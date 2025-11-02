@@ -205,3 +205,43 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Adicionar ao .gitignore gerado:
+
+# Environment variables
+.env
+*.env
+secrets/
+
+# Data files
+*.qza
+*.biom
+*.fna
+*.tre
+data/
+results/
+exports/
+
+# Databases
+greengenes*/
+plabase/
+*.qza
+
+# OS
+.DS_Store
+Thumbs.db
+
+# .gitignore (criar na raiz)
+*.env
+.env
+secrets/
+*.key
+config_local.yaml
+__pycache__/
+*.pyc
+.pytest_cache/
+*.qza
+*.biom
+*.fna
+data/
+results/
