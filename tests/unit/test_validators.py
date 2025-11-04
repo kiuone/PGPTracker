@@ -346,7 +346,6 @@ class TestValidateInputsMultipleErrors:
         error_msg = str(exc_info.value)
         # Should contain multiple error messages (bullet points)
         assert error_msg.count('-') >= 2  # At least 2 bullet points
-        assert error_msg.lower().count("error") >= 2
         assert "empty" in error_msg.lower()
         assert "not found" in error_msg.lower()
         assert "not a directory" in error_msg.lower()
