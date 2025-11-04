@@ -21,43 +21,14 @@ ENV_MAP = {
 }
 
 def detect_available_cores() -> int:
-    """
-    Detects number of available CPU cores.
-    
-    Returns:
-        int: Number of CPU cores.
-    """
-    return multiprocessing.cpu_count()
-
-# def detect_available_cores() -> int:
-#     return psutil.cpu_count(logical=False) # 'False' para núcleos físicos
+    return psutil.cpu_count(logical=False) or 1
 
 def detect_available_memory() -> float:
     """
-    Detects available system memory in GB.
-    
-    Returns:
-        float: Available memory in GB.
+    Detects available system memory in GB (cross-platform).
     """
-    try:
-        # Linux
-        with open('/proc/meminfo', 'r') as f:
-            for line in f:
-                if 'MemTotal' in line:
-                    mem_kb = int(line.split()[1])
-                    return round(mem_kb / (1024 * 1024), 2)
-    except FileNotFoundError:
-        # Fallback for non-Linux systems
-        return 0.0
-    
-    return 0.0
-
-# def detect_available_memory() -> float:
-#     """
-#     Detects available system memory in GB (cross-platform).
-#     """
-#     mem = psutil.virtual_memory()
-#     return round(mem.total / (1024 * 1024 * 1024), 2)
+    mem = psutil.virtual_memory()
+    return round(mem.total / (1024 * 1024 * 1024), 2)
 
 
 def check_conda_available() -> bool:
@@ -78,7 +49,7 @@ def check_conda_available() -> bool:
     except FileNotFoundError:
         return False
 
-@lru_cache
+@lru_cache(typed=True)
 def check_environment_exists(env_name: str) -> bool:
     """
     Checks if a conda environment exists.
@@ -98,12 +69,11 @@ def check_environment_exists(env_name: str) -> bool:
         )
         
         if result.returncode == 0:
-            return env_name in result.stdout
+            return bool(env_name in result.stdout)
         return False
         
     except FileNotFoundError:
         return False
-
 
 def validate_environment(tool: str) -> str:
     """

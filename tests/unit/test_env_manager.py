@@ -7,74 +7,84 @@ Run with: pytest tests/unit/test_env_manager.py -v
 import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
-
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 # Import functions to test
-# from pgptracker.utils.env_manager import (
-#     detect_available_cores,
-#     detect_available_memory,
-#     check_conda_available,
-#     check_environment_exists,
-#     validate_environment,
-#     run_command,
-#     get_system_resources,
-#     ENV_MAP
-# )
-
+from pgptracker.utils.env_manager import (
+    detect_available_cores,
+    detect_available_memory,
+    check_conda_available,
+    check_environment_exists,
+    validate_environment,
+    run_command,
+    get_system_resources,
+    ENV_MAP
+)
 
 class TestSystemDetection:
     """Tests for system resource detection functions."""
     
     def test_detect_available_cores(self):
         """Test CPU core detection."""
-        # Uncomment when importing real function
-        # cores = detect_available_cores()
-        # assert isinstance(cores, int)
-        # assert cores > 0
-        pass
+        
+        cores = detect_available_cores()
+        assert isinstance(cores, int)
+        assert cores > 0
+        #pass
     
     def test_detect_available_memory(self):
         """Test memory detection."""
-        # Uncomment when importing real function
-        # memory = detect_available_memory()
-        # assert isinstance(memory, float)
-        # assert memory >= 0  # May be 0 on non-Linux systems
-        pass
+        
+        memory = detect_available_memory()
+        assert isinstance(memory, float)
+        assert memory >= 0  # May be 0 on non-Linux systems
+        #pass
     
     def test_get_system_resources(self):
         """Test getting all system resources."""
-        # Uncomment when importing real function
-        # resources = get_system_resources()
-        # assert 'cores' in resources
-        # assert 'memory_gb' in resources
-        # assert isinstance(resources['cores'], int)
-        # assert isinstance(resources['memory_gb'], float)
-        pass
+        
+        resources = get_system_resources()
+        assert 'cores' in resources
+        assert 'memory_gb' in resources
+        assert isinstance(resources['cores'], int)
+        assert isinstance(resources['memory_gb'], float)
+        #pass
 
 
 class TestCondaDetection:
     """Tests for conda availability checks."""
+
+    def setup_method(self, method):
+        """Clear the lru_cache before each test."""
+        # Limpa o cache para evitar vazamento entre testes
+        check_environment_exists.cache_clear() 
+    
+    # def teardown_method(self, method):
+    #     """(Opcional) Limpa o cache depois também."""
+    #     check_environment_exists.cache_clear()
     
     @patch('subprocess.run')
     def test_check_conda_available_success(self, mock_run):
         """Test when conda is available."""
         mock_run.return_value = MagicMock(returncode=0)
         
-        # Uncomment when importing real function
-        # result = check_conda_available()
-        # assert result is True
-        # mock_run.assert_called_once()
-        pass
+        
+        result = check_conda_available()
+        assert result is True
+        mock_run.assert_called_once()
+        #pass
     
     @patch('subprocess.run')
     def test_check_conda_available_failure(self, mock_run):
         """Test when conda is not available."""
         mock_run.side_effect = FileNotFoundError()
         
-        # Uncomment when importing real function
-        # result = check_conda_available()
-        # assert result is False
-        pass
+        
+        result = check_conda_available()
+        assert result is False
+        #pass
     
     @patch('subprocess.run')
     def test_check_environment_exists_true(self, mock_run):
@@ -83,11 +93,9 @@ class TestCondaDetection:
             returncode=0,
             stdout="qiime2-amplicon-2025.10\npicrust2\npgptracker\n"
         )
-        
-        # Uncomment when importing real function
-        # result = check_environment_exists("qiime2-amplicon-2025.10")
-        # assert result is True
-        pass
+        result = check_environment_exists("qiime2-amplicon-2025.10")
+        assert result is True
+        #pass
     
     @patch('subprocess.run')
     def test_check_environment_exists_false(self, mock_run):
@@ -96,11 +104,9 @@ class TestCondaDetection:
             returncode=0,
             stdout="base\nsome_other_env\n"
         )
-        
-        # Uncomment when importing real function
-        # result = check_environment_exists("qiime2-amplicon-2025.10")
-        # assert result is False
-        pass
+        result = check_environment_exists("qiime2-amplicon-2025.10")
+        assert result is False
+        #pass
 
 
 class TestValidateEnvironment:
@@ -110,11 +116,9 @@ class TestValidateEnvironment:
     def test_validate_no_conda(self, mock_conda):
         """Test when conda is not available."""
         mock_conda.return_value = False
-        
-        # Uncomment when importing real function
-        # with pytest.raises(RuntimeError, match="Conda is not available"):
-        #     validate_environment("qiime")
-        pass
+        with pytest.raises(RuntimeError, match="Conda is not available"):
+            validate_environment("qiime")
+        #pass
     
     @patch('pgptracker.utils.env_manager.check_conda_available')
     @patch('pgptracker.utils.env_manager.check_environment_exists')
@@ -123,10 +127,9 @@ class TestValidateEnvironment:
         mock_conda.return_value = True
         mock_env_exists.return_value = False
         
-        # Uncomment when importing real function
-        # with pytest.raises(RuntimeError, match="not found"):
-        #     validate_environment("qiime")
-        pass
+        with pytest.raises(RuntimeError, match="not found"):
+            validate_environment("qiime")
+        #pass
     
     @patch('pgptracker.utils.env_manager.check_conda_available')
     @patch('pgptracker.utils.env_manager.check_environment_exists')
@@ -135,17 +138,16 @@ class TestValidateEnvironment:
         mock_conda.return_value = True
         mock_env_exists.return_value = True
         
-        # Uncomment when importing real function
-        # result = validate_environment("qiime")
-        # assert result == "qiime2-amplicon-2025.10"
-        pass
+        result = validate_environment("qiime")
+        assert result == "qiime2-amplicon-2025.10"
+        #pass
     
     def test_validate_unknown_tool(self):
         """Test with unknown tool name."""
-        # Uncomment when importing real function
-        # with pytest.raises(ValueError, match="Unknown tool"):
-        #     validate_environment("unknown_tool")
-        pass
+        
+        with pytest.raises(ValueError, match="Unknown tool"):
+            validate_environment("unknown_tool")
+        #pass
 
 
 class TestRunCommand:
@@ -162,11 +164,10 @@ class TestRunCommand:
             stderr=""
         )
         
-        # Uncomment when importing real function
-        # result = run_command("qiime", ["qiime", "--version"])
-        # assert result.returncode == 0
-        # mock_run.assert_called_once()
-        pass
+        result = run_command("qiime", ["qiime", "--version"])
+        assert result.returncode == 0
+        mock_run.assert_called_once()
+        #pass
     
     @patch('pgptracker.utils.env_manager.validate_environment')
     @patch('subprocess.run')
@@ -179,10 +180,9 @@ class TestRunCommand:
             stderr="error occurred"
         )
         
-        # Uncomment when importing real function
-        # with pytest.raises(subprocess.CalledProcessError):
-        #     run_command("qiime", ["qiime", "invalid", "command"], check=True)
-        pass
+        with pytest.raises(subprocess.CalledProcessError):
+            run_command("qiime", ["qiime", "invalid", "command"], check=True)
+        #pass
     
     @patch('pgptracker.utils.env_manager.validate_environment')
     @patch('subprocess.run')
@@ -194,12 +194,10 @@ class TestRunCommand:
             stdout="",
             stderr="error"
         )
-        
-        # Uncomment when importing real function
-        # result = run_command("picrust", ["some", "command"], check=False)
-        # assert result.returncode == 1
+        result = run_command("picrust", ["some", "command"], check=False)
+        assert result.returncode == 1
         # No exception should be raised
-        pass
+        #pass
 
 
 class TestEnvMap:
@@ -207,19 +205,19 @@ class TestEnvMap:
     
     def test_env_map_exists(self):
         """Test that ENV_MAP contains expected tools."""
-        # Uncomment when importing real function
-        # assert 'qiime' in ENV_MAP
-        # assert 'picrust' in ENV_MAP
-        # assert 'pgptracker' in ENV_MAP
-        pass
+        
+        assert 'qiime' in ENV_MAP
+        assert 'picrust' in ENV_MAP
+        assert 'pgptracker' in ENV_MAP
+        #pass
     
     def test_env_map_values(self):
         """Test ENV_MAP values are correct."""
-        # Uncomment when importing real function
-        # assert ENV_MAP['qiime'] == "qiime2-amplicon-2025.10"
-        # assert ENV_MAP['picrust'] == "picrust2"
-        # assert ENV_MAP['pgptracker'] == "pgptracker"
-        pass
+        
+        assert ENV_MAP['qiime'] == "qiime2-amplicon-2025.10"
+        assert ENV_MAP['picrust'] == "picrust2"
+        assert ENV_MAP['pgptracker'] == "pgptracker"
+        #pass
 
 
 @pytest.mark.slow
@@ -228,10 +226,10 @@ class TestIntegrationSystemResources:
     
     def test_actual_core_detection(self):
         """Test actual CPU core detection on system."""
-        # Uncomment when importing real function
-        # cores = detect_available_cores()
-        # assert cores >= 1  # Assume at least 1 core
-        pass
+        
+        cores = detect_available_cores()
+        assert cores >= 1  # Assume at least 1 core
+        #pass
     
     @pytest.mark.skipif(
         lambda pytestconfig: not pytestconfig.getoption("--run-slow"),
@@ -239,8 +237,8 @@ class TestIntegrationSystemResources:
     )
     def test_actual_conda_check(self, pytestconfig):
         """Test actual conda availability (slow, system-dependent)."""
-        # Uncomment when importing real function
-        # result = check_conda_available()
+        
+        result = check_conda_available()
         # Note: May be True or False depending on system
-        # assert isinstance(result, bool)
-        pass
+        assert isinstance(result, bool)
+        #pass

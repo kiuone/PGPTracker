@@ -13,12 +13,11 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Optional
-import datetime
 
+from pgptracker.utils.validators import validate_inputs
+from pgptracker.qiime.export_module import export_qza_files
 # Will be implemented in next artifacts
-# from pgptracker.utils.validators import validate_inputs
 # from pgptracker.interactive import run_interactive_mode
-# from pgptracker.qiime.export import export_qza_files
 # from pgptracker.picrust.phylo import build_phylogenetic_tree
 
 
@@ -33,7 +32,7 @@ def create_parser() -> argparse.ArgumentParser:
         prog="pgptracker",
         description="PGPTracker: Integrate metagenomic data to correlate "
                     "microbial markers with plant biochemical traits",
-        epilog="For more information, visit: https://github.com/kiuone/PGPTracker"
+        epilog="For more information, visit: https://github.com/yourusername/PGPTracker"
     )
     
     parser.add_argument(
@@ -111,7 +110,7 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     output_group.add_argument(
         "-o", "--output",
         type=str,
-        default="results/run_{date}",
+        default= None,
         metavar="PATH",
         help="Output directory (default: results/run_YYYY-MM-DD)"
     )
@@ -149,6 +148,20 @@ def process_command(args: argparse.Namespace) -> int:
     print("PGPTracker - Process Pipeline (Stage 1)")
     print("=" * 70)
     print()
+
+    # Create output directory and creates if needed
+    if args.output is None:
+        date_str = datetime.date.today().isoformat()
+        output_dir = Path(f"results/run_{date_str}")
+    else:
+        output_dir = Path(args.output)
+    
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        print(f"ERROR: Could not create output directory: {e}")
+        return 1 
+    args.output = output_dir
     
     # Interactive mode
     if args.interactive:
@@ -167,22 +180,24 @@ def process_command(args: argparse.Namespace) -> int:
     # Validate input files
     print("Step 1/6: Validating input files...")
     try:
-        # Will be implemented in utils/validators.py
-        # inputs = validate_inputs(args.rep_seqs, args.feature_table, args.output)
+        inputs = validate_inputs(args.rep_seqs, args.feature_table, args.output)
         print(f"  -> Representative sequences: {args.rep_seqs}")
         print(f"  -> Feature table: {args.feature_table}")
-        print(f"  -> Output directory: {args.output}")
-        # print(f"  -> Detected formats: {inputs['seq_format']}, {inputs['table_format']}")
+        print(f"  -> Output directory: {args.output}") 
+        print(f"  -> Detected formats: {inputs['seq_format']}, {inputs['table_format']}")
     except ValueError as e:
         print(f"\n{e}")
         return 1
     print()
     
     # Export .qza files if needed
-    print("Step 2/6: Exporting .qza files (if applicable)...")
-    # Will be implemented in qiime/export.py
-    print("  -> Checking file formats...")
-    print()
+    print("Step 2/6: Exporting files to standard formats...")
+    try:
+        exported = export_qza_files(inputs, inputs['output'])
+        print()
+    except (RuntimeError, FileNotFoundError) as e:
+        print(f"\nERROR: Export failed: {e}")
+        return 1
     
     # Build phylogenetic tree (PICRUSt2)
     print("Step 3/6: Building phylogenetic tree...")
