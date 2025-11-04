@@ -5,16 +5,19 @@ This module provides a single validation function that checks all inputs
 at once and provides clear error messages.
 """
 
+class ValidationError(Exception):
+    """Custom exception for input validation errors."""
+    pass
+
 from pathlib import Path
 from typing import Dict, List
 
-
-def _validate_file(filepath: str, file_type: str, valid_extensions: List[str]) -> List[str]:
+def _validate_file(path: Path, file_type: str, valid_extensions: List[str]) -> List[str]:
     """
     Helper function to validate a single file.
     
     Args:
-        filepath: Path to file
+        path: Path object to the file
         file_type: Description for error messages (e.g., "Sequences")
         valid_extensions: List of valid extensions
         
@@ -22,23 +25,21 @@ def _validate_file(filepath: str, file_type: str, valid_extensions: List[str]) -
         List of error messages (empty if valid)
     """
     errors = []
-    path = Path(filepath)
     
     if not path.exists():
-        errors.append(f"{file_type} file not found: {filepath}")
+        errors.append(f"{file_type} file not found: {path}")
     elif not path.is_file():
-        errors.append(f"{file_type} path is not a file: {filepath}")
+        errors.append(f"{file_type} path is not a file: {path}")
     elif path.stat().st_size == 0:
-        errors.append(f"{file_type} file is empty: {filepath}")
+        errors.append(f"{file_type} file is empty: {path}")
     elif path.suffix not in valid_extensions:
         ext_list = ", ".join(valid_extensions)
         errors.append(
             f"Invalid {file_type.lower()} format: {path.suffix}\n"
-            f"  Expected: {ext_list}"
+            f" Expected: {ext_list}"
         )
     
     return errors
-
 
 def validate_inputs(
     rep_seqs: str,
@@ -73,25 +74,26 @@ def validate_inputs(
         ValueError: If any validation fails, with all error messages combined.
     """
     errors = []
+
+    seq_path = Path(rep_seqs)
+    table_path = Path(feature_table)
+    out_path = Path(output_dir)
     
     # Validate sequences file
     errors.extend(_validate_file(
-        rep_seqs,
+        seq_path,
         "Sequences",
         ['.qza', '.fna', '.fasta', '.fa']
     ))
     
     # Validate feature table file
     errors.extend(_validate_file(
-        feature_table,
+        table_path,
         "Feature table",
         ['.qza', '.biom']
     ))
     
     # Check format compatibility (only if both files exist)
-    seq_path = Path(rep_seqs)
-    table_path = Path(feature_table)
-    
     if seq_path.exists() and table_path.exists():
         seq_is_qza = seq_path.suffix == '.qza'
         table_is_qza = table_path.suffix == '.qza'
@@ -106,7 +108,6 @@ def validate_inputs(
             )
     
     # Validate output directory
-    out_path = Path(output_dir)
     if out_path.exists() and not out_path.is_dir():
         errors.append(
             f"Output path exists but is not a directory: {output_dir}"
@@ -115,13 +116,15 @@ def validate_inputs(
     # Raise all errors at once
     if errors:
         error_msg = "Input validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-        raise ValueError(error_msg)
+        raise ValidationError(error_msg)
     
     # Create output directory if it doesn't exist
     try:
         out_path.mkdir(parents=True, exist_ok=True)
-    except PermissionError:
-        raise PermissionError(f"Cannot create output directory: {output_dir}")
+    except PermissionError as e:
+        raise ValidationError(f"Cannot create output directory (PermissionError): {output_dir}")
+    except Exception as e:
+        raise ValidationError(f"Failed to create output directory: {e}")
     
     # Return validated inputs with detected formats
     return {

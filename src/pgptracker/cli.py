@@ -13,13 +13,94 @@ import argparse
 import sys
 from pathlib import Path
 from typing import Optional
-
-from pgptracker.utils.validators import validate_inputs
+import importlib.resources
+from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.qiime.export_module import export_qza_files
+import subprocess
+from pathlib import Path
+from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 # Will be implemented in next artifacts
 # from pgptracker.interactive import run_interactive_mode
 # from pgptracker.picrust.phylo import build_phylogenetic_tree
 
+
+def setup_command(args: argparse.Namespace) -> int:
+    """
+    Executes the Conda environment creation or update.
+    Ensures all environments match the required .yml files.
+    """
+    print("PGPTracker - Environment Setup")
+    
+    # 1. Get the path to the packaged .yml files
+    try:
+        env_files_path = importlib.resources.files("pgptracker") / "environments"
+    except Exception as e:
+        print(f"Critical Error: Could not find the 'environments' folder. {e}")
+        return 1
+    
+    # 2. Map environment names to their .yml files
+    env_to_file_map = {
+        ENV_MAP["qiime"]: "qiime2-amplicon-2025.10.yml",
+        ENV_MAP["Picrust2"]: "picrust2.yml",
+        ENV_MAP["PGPTracker"]: "pgptracker.yml",
+    }
+
+    all_success = True
+    if args.force:
+        print("Checking and syncing environments (--force enabled)...")
+    else:
+        print("Checking environments (run with --force to update)...")
+
+    for env_name, yml_filename in env_to_file_map.items():
+
+        yml_path = env_files_path / yml_filename
+        # Verify if the .yml file exists
+        if not yml_path.exists():
+            print(f"\n[ERROR] Environment file not found: {yml_path}")
+            print(f"       Cannot create or update environment '{env_name}'.")
+            all_success = False
+            continue 
+
+        cmd = []
+        action_text = ""
+
+        env_exists = check_environment_exists(env_name)
+        
+        if env_exists and not args.force:
+            print(f"[INFO] Environment '{env_name}' already exists. Skipping.")
+            continue
+        elif env_exists and args.force:
+            print(f"[INFO] Environment '{env_name}' exists. Forcing update...")
+            cmd = ["conda", "env", "update", "--name", env_name, "-f", str(yml_path), "--prune"]
+            action_text = "updated"
+        else: # env_exists is False
+            print(f"[INFO] Environment '{env_name}' not found. Attempting creation...")
+            cmd = ["conda", "env", "create", "--name", env_name, "-f", str(yml_path)]
+            action_text = "created"
+            
+        print(f"       Using file: {yml_path}")
+        print("       This may take several minutes...")
+        
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"\n[ERROR] Failed to {action_text} '{env_name}' environment.")
+            print("Conda Output (stderr):")
+            print(e.stderr) 
+            all_success = False
+        except FileNotFoundError:
+            print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?")
+            all_success = False
+            break 
+            
+    if all_success:
+        print("Setup completed successfully!")
+        return 0
+    else:
+        print("Setup failed for one or more environments.")
+        return 1
 
 def create_parser() -> argparse.ArgumentParser:
     """
@@ -32,7 +113,7 @@ def create_parser() -> argparse.ArgumentParser:
         prog="pgptracker",
         description="PGPTracker: Integrate metagenomic data to correlate "
                     "microbial markers with plant biochemical traits",
-        epilog="For more information, visit: https://github.com/yourusername/PGPTracker"
+        epilog="For more information, visit: https://github.com/kiuone/PGPTracker"
     )
     
     parser.add_argument(
@@ -53,9 +134,19 @@ def create_parser() -> argparse.ArgumentParser:
         help="Process ASV sequences to generate PGPT predictions"
     )
     _add_process_arguments(process_parser)
+
+    setup_parser = subparsers.add_parser(
+        "setup",
+        help="Set up the required Conda environments (qiime2-amplicon-2025.10, picrust2)"
+    )
+
+    setup_parser.add_argument(
+        "-f", "--force",
+        action="store_true",
+        help="Force update of existing environments to match .yml files"
+        )
     
     return parser
-
 
 def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     """
@@ -134,6 +225,7 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
 
+
 def process_command(args: argparse.Namespace) -> int:
     """
     Executes the process command (Stage 1: ASVs -> PGPTs).
@@ -144,49 +236,40 @@ def process_command(args: argparse.Namespace) -> int:
     Returns:
         int: Exit code (0 for success, non-zero for errors).
     """
-    print("=" * 70)
     print("PGPTracker - Process Pipeline (Stage 1)")
-    print("=" * 70)
     print()
-
-    # Create output directory and creates if needed
-    if args.output is None:
-        date_str = datetime.date.today().isoformat()
-        output_dir = Path(f"results/run_{date_str}")
-    else:
-        output_dir = Path(args.output)
     
-    try:
-        output_dir.mkdir(parents=True, exist_ok=True)
-    except OSError as e:
-        print(f"ERROR: Could not create output directory: {e}")
-        return 1 
-    args.output = output_dir
-    
-    # Interactive mode
+    #verify the interactive mode
     if args.interactive:
         print("Starting interactive mode...")
         # Will be implemented in interactive.py
         # return run_interactive_mode()
-        print("ERROR: Interactive mode not yet implemented")
+        print("ERROR: Interactive mode not yet implemented", file=sys.stderr)
+        return 1
+    # Non-interactive mode requires both input files
+    # Only happens if not in interactive mode
+    elif not args.rep_seqs or not args.feature_table:
+        print("ERROR: --rep-seqs and --feature-table are required in non-interactive mode", file=sys.stderr)
+        print("       Use --interactive for guided prompts", file=sys.stderr)
         return 1
     
-    # Non-interactive mode validation
-    if not args.rep_seqs or not args.feature_table:
-        print("ERROR: --rep-seqs and --feature-table are required in non-interactive mode")
-        print("       Use --interactive for guided prompts")
-        return 1
-    
+    # Determine output directory
+    output_dir_str = args.output
+    if output_dir_str is None:
+        from datetime import date
+        output_dir_str = f"results/run_{date.today():%Y-%m-%d}"
+
     # Validate input files
     print("Step 1/6: Validating input files...")
     try:
-        inputs = validate_inputs(args.rep_seqs, args.feature_table, args.output)
-        print(f"  -> Representative sequences: {args.rep_seqs}")
-        print(f"  -> Feature table: {args.feature_table}")
-        print(f"  -> Output directory: {args.output}") 
+        inputs = validate_inputs(args.rep_seqs, args.feature_table, output_dir_str)
+        print(f"  -> Representative sequences: {inputs['sequences']}")
+        print(f"  -> Feature table: {inputs['table']}")
+        print(f"  -> Output directory: {inputs['output']}")
         print(f"  -> Detected formats: {inputs['seq_format']}, {inputs['table_format']}")
-    except ValueError as e:
-        print(f"\n{e}")
+    
+    except ValidationError as e:
+        print(f"\n[VALIDATION ERROR]\n{e}", file=sys.stderr)
         return 1
     print()
     
@@ -195,12 +278,13 @@ def process_command(args: argparse.Namespace) -> int:
     try:
         exported = export_qza_files(inputs, inputs['output'])
         print()
-    except (RuntimeError, FileNotFoundError) as e:
-        print(f"\nERROR: Export failed: {e}")
+    except (RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[EXPORT ERROR] Export failed: {e}", file=sys.stderr)
         return 1
     
     # Build phylogenetic tree (PICRUSt2)
     print("Step 3/6: Building phylogenetic tree...")
+    print(f"  -> Using sequences: {exported['sequences']}") # Usando o .fna exportado
     print("  -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
     # Will be implemented in picrust/phylo.py
     print()
@@ -214,6 +298,7 @@ def process_command(args: argparse.Namespace) -> int:
     
     # Normalize abundances (PICRUSt2)
     print("Step 5/6: Normalizing abundances...")
+    print(f"  -> Using table: {exported['table']}") # Usando o .biom exportado
     print("  -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
     # Will be implemented in picrust/normalize.py
     print()
@@ -224,13 +309,10 @@ def process_command(args: argparse.Namespace) -> int:
     # Will be implemented in analysis/pgpt.py
     print()
     
-    print("=" * 70)
     print("Pipeline completed successfully!")
-    print(f"Results saved to: {args.output}")
-    print("=" * 70)
+    print(f"Results saved to: {inputs['output']}")
     
     return 0
-
 
 def main() -> int:
     """
@@ -244,6 +326,8 @@ def main() -> int:
     
     if args.command == "process":
         return process_command(args)
+    elif args.command == "setup":
+        return setup_command(args)
     
     # Should not reach here due to required=True
     parser.print_help()

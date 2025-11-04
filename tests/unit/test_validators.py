@@ -7,14 +7,8 @@ Run with: pytest tests/unit/test_validators.py -v
 import pytest
 from pathlib import Path
 import tempfile
-import sys
 import os
-
-# Add src to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
-
-from pgptracker.utils.validators import validate_inputs
-
+from pgptracker.utils.validator import validate_inputs, ValidationError
 
 @pytest.fixture
 def temp_dir():
@@ -157,7 +151,7 @@ class TestValidateInputsSequenceErrors:
         """Test with non-existent sequences file."""
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 "nonexistent.fna",
                 str(valid_biom_file),
@@ -171,7 +165,7 @@ class TestValidateInputsSequenceErrors:
         """Test with empty sequences file."""
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(empty_file),
                 str(valid_biom_file),
@@ -187,7 +181,7 @@ class TestValidateInputsSequenceErrors:
         invalid_file.write_text("some content")
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(invalid_file),
                 str(valid_biom_file),
@@ -203,7 +197,7 @@ class TestValidateInputsSequenceErrors:
         seq_dir.mkdir()
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(seq_dir),
                 str(valid_biom_file),
@@ -220,7 +214,7 @@ class TestValidateInputsTableErrors:
         """Test with non-existent feature table."""
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_fasta_file),
                 "nonexistent.biom",
@@ -236,7 +230,7 @@ class TestValidateInputsTableErrors:
         invalid_table.write_text("some content")
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_fasta_file),
                 str(invalid_table),
@@ -252,7 +246,7 @@ class TestValidateInputsTableErrors:
         empty_table.touch()
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_fasta_file),
                 str(empty_table),
@@ -269,7 +263,7 @@ class TestValidateInputsFormatMismatch:
         """Test format mismatch: .qza sequences with .biom table."""
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_qza_sequences),
                 str(valid_biom_file),
@@ -285,7 +279,7 @@ class TestValidateInputsFormatMismatch:
         """Test format mismatch: .fna sequences with .qza table (Gemini's bug catch)."""
         output_dir = temp_dir / "output"
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_fasta_file),
                 str(valid_qza_table),
@@ -306,7 +300,7 @@ class TestValidateInputsOutputErrors:
         output_file = temp_dir / "output.txt"
         output_file.write_text("content")
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(valid_fasta_file),
                 str(valid_biom_file),
@@ -324,7 +318,7 @@ class TestValidateInputsMultipleErrors:
         output_file = temp_dir / "output.txt"
         output_file.write_text("content")
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 "nonexistent_seqs.fna",
                 "nonexistent_table.biom",
@@ -342,7 +336,7 @@ class TestValidateInputsMultipleErrors:
         output_file = temp_dir / "output.txt"
         output_file.write_text("content")
         
-        with pytest.raises(ValueError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             validate_inputs(
                 str(empty_file),
                 "nonexistent.biom",
@@ -352,6 +346,7 @@ class TestValidateInputsMultipleErrors:
         error_msg = str(exc_info.value)
         # Should contain multiple error messages (bullet points)
         assert error_msg.count('-') >= 2  # At least 2 bullet points
+        assert error_msg.lower().count("error") >= 2
         assert "empty" in error_msg.lower()
         assert "not found" in error_msg.lower()
         assert "not a directory" in error_msg.lower()

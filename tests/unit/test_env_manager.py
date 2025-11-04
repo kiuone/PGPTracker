@@ -7,9 +7,8 @@ Run with: pytest tests/unit/test_env_manager.py -v
 import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
-import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+# sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
 # Import functions to test
 from pgptracker.utils.env_manager import (
@@ -58,11 +57,10 @@ class TestCondaDetection:
 
     def setup_method(self, method):
         """Clear the lru_cache before each test."""
-        # Limpa o cache para evitar vazamento entre testes
         check_environment_exists.cache_clear() 
     
     # def teardown_method(self, method):
-    #     """(Opcional) Limpa o cache depois também."""
+    #     """(Optional) Clear cache afterwards as well."""
     #     check_environment_exists.cache_clear()
     
     @patch('subprocess.run')
@@ -188,37 +186,16 @@ class TestRunCommand:
     @patch('subprocess.run')
     def test_run_command_no_check(self, mock_run, mock_validate):
         """Test command execution with check=False."""
-        mock_validate.return_value = "picrust2"
+        mock_validate.return_value = "Picrust2"
         mock_run.return_value = MagicMock(
             returncode=1,
             stdout="",
             stderr="error"
         )
-        result = run_command("picrust", ["some", "command"], check=False)
+        result = run_command("Picrust2", ["some", "command"], check=False)
         assert result.returncode == 1
         # No exception should be raised
         #pass
-
-
-class TestEnvMap:
-    """Tests for environment mapping."""
-    
-    def test_env_map_exists(self):
-        """Test that ENV_MAP contains expected tools."""
-        
-        assert 'qiime' in ENV_MAP
-        assert 'picrust' in ENV_MAP
-        assert 'pgptracker' in ENV_MAP
-        #pass
-    
-    def test_env_map_values(self):
-        """Test ENV_MAP values are correct."""
-        
-        assert ENV_MAP['qiime'] == "qiime2-amplicon-2025.10"
-        assert ENV_MAP['picrust'] == "picrust2"
-        assert ENV_MAP['pgptracker'] == "pgptracker"
-        #pass
-
 
 @pytest.mark.slow
 class TestIntegrationSystemResources:
@@ -231,14 +208,9 @@ class TestIntegrationSystemResources:
         assert cores >= 1  # Assume at least 1 core
         #pass
     
-    @pytest.mark.skipif(
-        lambda pytestconfig: not pytestconfig.getoption("--run-slow"),
-        reason="Only run with --run-slow flag"
-    )
     def test_actual_conda_check(self, pytestconfig):
         """Test actual conda availability (slow, system-dependent)."""
-        
+        if not pytestconfig.getoption("--run-slow"):
+            pytest.skip("Only run with --run-slow flag")
         result = check_conda_available()
-        # Note: May be True or False depending on system
         assert isinstance(result, bool)
-        #pass

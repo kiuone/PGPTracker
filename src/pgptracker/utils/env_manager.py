@@ -16,8 +16,8 @@ from functools import lru_cache
 # Environment mapping
 ENV_MAP = {
     "qiime": "qiime2-amplicon-2025.10",
-    "picrust": "picrust2",
-    "pgptracker": "pgptracker"
+    "Picrust2": "picrust2",
+    "PGPTracker": "pgptracker"
 }
 
 def detect_available_cores() -> int:
@@ -69,7 +69,9 @@ def check_environment_exists(env_name: str) -> bool:
         )
         
         if result.returncode == 0:
-            return bool(env_name in result.stdout)
+            # Split output into lines and check for exact match
+            environments = [line.split()[0] for line in result.stdout.splitlines() if line]
+            return env_name in environments
         return False
         
     except FileNotFoundError:
@@ -80,7 +82,7 @@ def validate_environment(tool: str) -> str:
     Validates that required environment exists for a tool.
     
     Args:
-        tool: Tool name ('qiime', 'picrust', or 'pgptracker').
+        tool: Tool name ('qiime2', 'picrust', or 'pgptracker').
         
     Returns:
         str: Name of the conda environment.
@@ -120,7 +122,7 @@ def run_command(
     Runs a command in the appropriate conda environment.
     
     Args:
-        tool: Tool name ('qiime', 'picrust', or 'pgptracker').
+        tool: Tool name ('qiime2', 'picrust', or 'pgptracker').
         cmd: Command to run as list of strings.
         cwd: Working directory for command execution.
         capture_output: Whether to capture stdout/stderr.
@@ -151,7 +153,7 @@ def run_command(
         error_msg = f"Command failed with exit code {result.returncode}:\n"
         error_msg += f"  Command: {' '.join(cmd)}\n"
         if capture_output and result.stderr:
-            error_msg += f"  Error: {result.stderr[:500]}"
+            error_msg += f"  Error: {result.stderr}"
         raise subprocess.CalledProcessError(
             result.returncode,
             full_cmd,
