@@ -11,14 +11,12 @@ Institution: UFPR Palotina - Bioprocess and Biotechnology Engineering
 
 import argparse
 import sys
-from pathlib import Path
-from typing import Optional
 import importlib.resources
 from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.qiime.export_module import export_qza_files
 import subprocess
-from pathlib import Path
-from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
+from datetime import date
+from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP, detect_available_cores, detect_available_memory
 from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
 from pgptracker.picrust.hsp_prediction import predict_gene_content 
 from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline 
@@ -43,7 +41,7 @@ def setup_command(args: argparse.Namespace) -> int:
     env_to_file_map = {
         ENV_MAP["qiime"]: "qiime2-amplicon-2025.10.yml",
         ENV_MAP["Picrust2"]: "picrust2.yml",
-        ENV_MAP["PGPTracker"]: "pgptracker.yml",
+        # ENV_MAP["PGPTracker"]: "pgptracker.yml",
     }
 
     all_success = True
@@ -82,14 +80,20 @@ def setup_command(args: argparse.Namespace) -> int:
         print(f"       Using file: {yml_path}")
         print("       This may take several minutes...")
         
-        try:
-            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-            print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
+        # try:
+        #     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        #     print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
             
+        # except subprocess.CalledProcessError as e:
+        #     print(f"\n[ERROR] Failed to {action_text} '{env_name}' environment.")
+        #     print("Conda Output (stderr):")
+        #     print(e.stderr) 
+        #     all_success = False
+        try:
+            result = subprocess.run(cmd, check=True)
+            print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
         except subprocess.CalledProcessError as e:
-            print(f"\n[ERROR] Failed to {action_text} '{env_name}' environment.")
-            print("Conda Output (stderr):")
-            print(e.stderr) 
+            print(f"\n[ERROR] Failed to {action_text} '{env_name}'. Conda exited with code {e.returncode}.")
             all_success = False
         except FileNotFoundError:
             print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?")
@@ -102,6 +106,7 @@ def setup_command(args: argparse.Namespace) -> int:
     else:
         print("Setup failed for one or more environments.")
         return 1
+
 
 def create_parser() -> argparse.ArgumentParser:
     """
@@ -183,6 +188,14 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="FLOAT",
         help="Maximum NSTI threshold for filtering (default: 1.7)"
     )
+
+    params_group.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1000,
+        metavar="INT",
+        help="Gene families per chunk for hsp.py (default: 1000)"
+    )
     
     params_group.add_argument(
         "--stratified",
@@ -225,8 +238,6 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         help="Run in interactive mode with guided prompts"
     )
 
-
-
 def process_command(args: argparse.Namespace) -> int:
     """
     Executes the process command (Stage 1: ASVs -> PGPTs).
@@ -257,13 +268,14 @@ def process_command(args: argparse.Namespace) -> int:
     # Determine output directory
     output_dir_str = args.output
     if output_dir_str is None:
-        from datetime import date
         output_dir_str = f"results/run_{date.today():%d-%m-%Y}"
 
     # Determine threads
     # Use detect_available_cores() from env_manager if -t is not set
     threads = args.threads or detect_available_cores()
+    RAM = detect_available_memory()
     print(f"Using {threads} threads for processing.")
+    print(f"{RAM} of RAM available for processing.\n note: If the process get 'killed' if means you need more RAM.")
     print(f"Setting Max NSTI to: {args.max_nsti}")
 
     # Validate input files
@@ -314,7 +326,8 @@ def process_command(args: argparse.Namespace) -> int:
         predicted_paths = predict_gene_content(
             tree_path=phylo_tree_path,
             output_dir=picrust_dir,
-            threads=threads
+            threads=threads,
+            chunk_size=args.chunk_size
         )
     except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[PREDICT ERROR] Gene prediction failed: {e}", file=sys.stderr)
@@ -340,8 +353,8 @@ def process_command(args: argparse.Namespace) -> int:
     print("Step 6/6: Generating PGPT tables...")
     print("  -> Mapping KOs to PGPTs using PLaBA database")
     # Will be implemented in analysis/pgpt.py
-    print()
-    
+
+
     print("Pipeline completed successfully!")
     print(f"Results saved to: {inputs['output']}")
     
