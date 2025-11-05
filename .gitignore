@@ -214,34 +214,21 @@ __marimo__/
 secrets/
 
 # Data files
-*.qza
-*.biom
-*.fna
-*.tre
 data/
 results/
 exports/
-
-# Databases
-greengenes*/
-plabase/
-*.qza
 
 # OS
 .DS_Store
 Thumbs.db
 
 # .gitignore (criar na raiz)
-*.env
-.env
 secrets/
 *.key
 config_local.yaml
 __pycache__/
 *.pyc
 .pytest_cache/
-*.qza
-*.biom
-*.fna
 data/
 results/
+src/pgptracker/databases/2024.09.taxonomy.asv.tsv.qza

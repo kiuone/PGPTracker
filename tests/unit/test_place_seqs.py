@@ -8,7 +8,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from subprocess import CalledProcessError
-# Corrigido: Importa do nome de arquivo correto
 from pgptracker.picrust.place_seqs import build_phylogenetic_tree, _validate_output
 
 
@@ -26,7 +25,6 @@ class TestBuildPhylogeneticTree:
         
         # Mock run_command
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.place_seqs.run_command', mock_run):
             # Create output file to simulate success
             output_dir.mkdir()
@@ -42,7 +40,6 @@ class TestBuildPhylogeneticTree:
         # Check command structure
         call_args = mock_run.call_args
         
-        # CRÍTICO - Corrigido: Verifica se o ambiente Conda correto foi chamado
         assert call_args[0][0] == "Picrust2" 
         
         cmd = call_args[0][1]
@@ -52,7 +49,6 @@ class TestBuildPhylogeneticTree:
         assert "4" in cmd
         assert "sepp" in cmd
         
-        # CRÍTICO - Corrigido: Verifica se a flag indesejada NÃO está presente
         assert "--ref_dir" not in cmd
     
     def test_missing_sequences_file(self, tmp_path):
@@ -81,7 +77,6 @@ class TestBuildPhylogeneticTree:
         # Mock run_command to raise error
         mock_run = Mock(side_effect=CalledProcessError(1, "place_seqs.py"))
         
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.place_seqs.run_command', mock_run):
             with pytest.raises(CalledProcessError):
                 build_phylogenetic_tree(sequences, output_dir)
@@ -93,7 +88,6 @@ class TestBuildPhylogeneticTree:
         output_dir = tmp_path / "output"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.place_seqs.run_command', mock_run):
             # Don't create output file to simulate failure
             output_dir.mkdir()
@@ -109,7 +103,6 @@ class TestBuildPhylogeneticTree:
         expected_tree = output_dir / "placed_seqs.tre"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.place_seqs.run_command', mock_run):
             output_dir.mkdir()
             expected_tree.touch()  # Empty file
@@ -117,8 +110,6 @@ class TestBuildPhylogeneticTree:
             with pytest.raises(RuntimeError, match="created empty output file"):
                 build_phylogenetic_tree(sequences, output_dir)
 
-
-# Corrigido: Esta classe está CORRETA e é mantida.
 class TestValidateOutput:
     """Tests for _validate_output helper function."""
     

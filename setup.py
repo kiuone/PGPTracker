@@ -59,6 +59,7 @@ setup(
     },
     package_data={
         "pgptracker": ["databases/*.txt",
+                       "databases/*.tsv",
                        "environments/*.yml"],
     },
 )

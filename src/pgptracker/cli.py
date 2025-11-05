@@ -20,6 +20,8 @@ from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP, dete
 from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
 from pgptracker.picrust.hsp_prediction import predict_gene_content 
 from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline 
+from pgptracker.qiime.classify import classify_taxonomy
+from pgptracker.utils.merge import merge_taxonomy_to_table
 # Will be implemented in next artifacts
 # from pgptracker.interactive import run_interactive_mode
 
@@ -79,16 +81,7 @@ def setup_command(args: argparse.Namespace) -> int:
             
         print(f"       Using file: {yml_path}")
         print("       This may take several minutes...")
-        
-        # try:
-        #     result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        #     print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
-            
-        # except subprocess.CalledProcessError as e:
-        #     print(f"\n[ERROR] Failed to {action_text} '{env_name}' environment.")
-        #     print("Conda Output (stderr):")
-        #     print(e.stderr) 
-        #     all_success = False
+
         try:
             result = subprocess.run(cmd, check=True)
             print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
@@ -169,6 +162,16 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         metavar="PATH",
         help="Path to representative sequences (.qza or .fna)"
+    )
+
+    input_group.add_argument(
+         "--classifier-qza",
+         type=str,
+         metavar="PATH",
+         default=None, # Optional
+         help="Path to a custom QIIME2 classifier .qza file. "
+                "If not provided, the default Greengenes (2024.09) classifier "
+                "bundled with PGPTracker will be used."
     )
     
     input_group.add_argument(
@@ -279,7 +282,7 @@ def process_command(args: argparse.Namespace) -> int:
     print(f"Setting Max NSTI to: {args.max_nsti}")
 
     # Validate input files
-    print("Step 1/6: Validating input files...")
+    print("Step 1/8: Validating input files...")
     try:
         inputs = validate_inputs(args.rep_seqs, args.feature_table, output_dir_str)
         print(f"  -> Representative sequences: {inputs['sequences']}")
@@ -293,7 +296,7 @@ def process_command(args: argparse.Namespace) -> int:
     print()
     
     # Export .qza files if needed
-    print("Step 2/6: Exporting files to standard formats...")
+    print("Step 2/8: Exporting files to standard formats...")
     try:
         exported = export_qza_files(inputs, inputs['output'])
     except (RuntimeError, subprocess.CalledProcessError) as e:
@@ -304,7 +307,7 @@ def process_command(args: argparse.Namespace) -> int:
     picrust_dir = inputs['output'] / "picrust2_intermediates"
     
     # Build phylogenetic tree (PICRUSt2)
-    print("Step 3/6: Building phylogenetic tree...")
+    print("Step 3/8: Building phylogenetic tree...")
     print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
     print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
     try:
@@ -318,7 +321,7 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Predict gene content (PICRUSt2)
-    print("Step 4/6: Predicting gene content...")
+    print("Step 4/8: Predicting gene content...")
     print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
     print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
     try:
@@ -334,7 +337,7 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Normalize abundances (PICRUSt2)
-    print("Step 5/6: Normalizing abundances...")
+    print("Step 5/8: Normalizing abundances...")
     print(f" -> Using table: {exported['table']}") # Using the .biom exported
     print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
     try:
@@ -349,8 +352,63 @@ def process_command(args: argparse.Namespace) -> int:
         print(f"\n[PIPELINE ERROR] Metagenome pipeline failed: {e}", file=sys.stderr)
         return 1
     
+    # Classify taxonomy (QIIME2)
+    print("Step 6/8: Classifying taxonomy...")
+    classifier_to_use = None
+    if args.classifier_qza:
+        # 1. User gave a custom classifier
+        print(f"\n-> Using custom classifier from: {args.classifier_qza}")
+        classifier_to_use = Path(args.classifier_qza)
+
+        # Validate custom classifier exists
+        if not classifier_to_use.exists():
+            print(f"[ERROR] Custom classifier file not found: {classifier_to_use}", file=sys.stderr)
+            return 1
+    else:
+        # 2. User didn't provide a classifier, use default bundled
+        print("\n-> Using default bundled Greengenes (2024.09) classifier.")
+        try:
+            clf_path_obj = importlib.resources.files("pgptracker") / "databases" / "2024.09.taxonomy.asv.tsv.qza"
+            with importlib.resources.as_file(clf_path_obj) as real_path:
+                classifier_to_use = real_path
+
+            if not classifier_to_use.exists(): 
+                raise FileNotFoundError 
+
+        except FileNotFoundError:
+            print("[ERROR] Default classifier (2024.09.taxonomy.asv.tsv.qza) not found!", file=sys.stderr)
+            print("         This file should be bundled with PGPTracker.", file=sys.stderr)
+            print("         Ensure 'databases/*.qza' is in setup.py's package_data.", file=sys.stderr)
+            return 1
+        print(f"   -> Classifier path: {classifier_to_use}")
+
+    try:
+        taxonomy_path = classify_taxonomy(
+         rep_seqs_path=inputs['sequences'],    
+         seq_format=inputs['seq_format'],      
+         classifier_qza=classifier_to_use, 
+         output_dir=inputs['output'], # Save in /output/taxonomy/
+         threads=threads
+        )
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[TAXONOMY ERROR] Classification failed: {e}", file=sys.stderr)
+        return 1
+
+    # Merge taxonomy into feature table (BIOM)
+    print("\nStep 7/8: Merging taxonomy into feature table...")
+    try:
+        merged_table_path = merge_taxonomy_to_table(
+            seqtab_norm_gz=pipeline_outputs['seqtab_norm'],
+            taxonomy_tsv=taxonomy_path,
+            output_dir=inputs['output'], # Save in /output/
+            save_intermediates=args.save_intermediates
+        )
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[MERGE ERROR] Table merging failed: {e}", file=sys.stderr)
+        return 1
+    
     # Generate PGPT tables
-    print("Step 6/6: Generating PGPT tables...")
+    print("Step 8/8: Generating PGPT tables...")
     print("  -> Mapping KOs to PGPTs using PLaBA database")
     # Will be implemented in analysis/pgpt.py
 

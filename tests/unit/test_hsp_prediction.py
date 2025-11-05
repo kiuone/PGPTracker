@@ -8,7 +8,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, call
 from subprocess import CalledProcessError
-# Corrigido: Importa do nome de arquivo correto
 from pgptracker.picrust.hsp_prediction import predict_gene_content, _run_hsp_prediction
 
 
@@ -27,7 +26,6 @@ class TestPredictGeneContent:
         
         # Mock run_command
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             # Create output files to simulate success
             output_dir.mkdir()
@@ -46,13 +44,11 @@ class TestPredictGeneContent:
         calls = mock_run.call_args_list
         assert len(calls) == 2
         
-        # CRÍTICO - Corrigido: Verifica o ambiente na primeira chamada (marker)
         assert calls[0][0][0] == "Picrust2"
         marker_cmd = calls[0][0][1]
         assert "16S" in marker_cmd
         assert "-n" in marker_cmd
         
-        # CRÍTICO - Corrigido: Verifica o ambiente na segunda chamada (KO)
         assert calls[1][0][0] == "Picrust2"
         ko_cmd = calls[1][0][1]
         assert "KO" in ko_cmd
@@ -84,7 +80,6 @@ class TestPredictGeneContent:
         # Mock run_command to fail on first call
         mock_run = Mock(side_effect=CalledProcessError(1, "hsp.py"))
         
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             with pytest.raises(CalledProcessError):
                 predict_gene_content(tree, output_dir)
@@ -129,7 +124,6 @@ class TestRunHspPrediction:
         output = tmp_path / "marker.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             output.write_text("content")
             
@@ -142,7 +136,6 @@ class TestRunHspPrediction:
                 calculate_nsti=True
             )
         
-        # CRÍTICO - Corrigido: Verifica o ambiente
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == "Picrust2"
         
@@ -159,7 +152,6 @@ class TestRunHspPrediction:
         output = tmp_path / "ko.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             output.write_text("content")
             
@@ -172,7 +164,6 @@ class TestRunHspPrediction:
                 calculate_nsti=False
             )
         
-        # CRÍTICO - Corrigido: Verifica o ambiente
         mock_run.assert_called_once()
         assert mock_run.call_args[0][0] == "Picrust2"
         
@@ -188,7 +179,6 @@ class TestRunHspPrediction:
         output = tmp_path / "output.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             # Don't create output file
             
@@ -209,7 +199,6 @@ class TestRunHspPrediction:
         output = tmp_path / "output.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.hsp_prediction.run_command', mock_run):
             output.touch()  # Empty file
             

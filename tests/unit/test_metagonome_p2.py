@@ -8,7 +8,6 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from subprocess import CalledProcessError
-# Corrigido: Importa do nome de arquivo correto
 from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
 
 
@@ -34,7 +33,6 @@ class TestRunMetagenomePipeline:
         
         # Mock run_command
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.metagenome_p2.run_command', mock_run):
             # Create output files to simulate success
             metagenome_out.mkdir(parents=True)
@@ -52,7 +50,6 @@ class TestRunMetagenomePipeline:
         # Check command structure
         call_args = mock_run.call_args
         
-        # CRÍTICO - Corrigido: Verifica se o ambiente Conda correto foi chamado
         assert call_args[0][0] == "Picrust2"
         
         cmd = call_args[0][1]
@@ -135,7 +132,6 @@ class TestRunMetagenomePipeline:
         # Mock run_command to raise error
         mock_run = Mock(side_effect=CalledProcessError(1, "metagenome_pipeline.py"))
         
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.metagenome_p2.run_command', mock_run):
             with pytest.raises(CalledProcessError):
                 run_metagenome_pipeline(table, marker, ko, output_dir)
@@ -155,7 +151,6 @@ class TestRunMetagenomePipeline:
         expected_unstrat = metagenome_out / "pred_metagenome_unstrat.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.metagenome_p2.run_command', mock_run):
             # Only create unstratified file, not seqtab_norm
             metagenome_out.mkdir(parents=True)
@@ -179,7 +174,6 @@ class TestRunMetagenomePipeline:
         expected_norm = metagenome_out / "seqtab_norm.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.metagenome_p2.run_command', mock_run):
             # Only create seqtab_norm, not unstratified
             metagenome_out.mkdir(parents=True)
@@ -204,7 +198,6 @@ class TestRunMetagenomePipeline:
         expected_unstrat = metagenome_out / "pred_metagenome_unstrat.tsv.gz"
         
         mock_run = Mock()
-        # Corrigido: patch usa o nome de arquivo correto
         with patch('pgptracker.picrust.metagenome_p2.run_command', mock_run):
             metagenome_out.mkdir(parents=True)
             expected_norm.write_text("content")
@@ -214,8 +207,7 @@ class TestRunMetagenomePipeline:
         
         # Verify custom max_nsti in command
         call_args = mock_run.call_args
-        
-        # CRÍTICO - Corrigido: Verifica se o ambiente Conda correto foi chamado
+
         assert call_args[0][0] == "Picrust2"
         
         cmd = call_args[0][1]
