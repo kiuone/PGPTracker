@@ -21,7 +21,7 @@ from pathlib import Path
 from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
 from pgptracker.picrust.hsp_prediction import predict_gene_content 
-from pgptracker.picrust.metagenome_picrust2 import run_metagenome_pipeline 
+from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline 
 # Will be implemented in next artifacts
 # from pgptracker.interactive import run_interactive_mode
 
