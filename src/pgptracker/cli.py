@@ -19,10 +19,11 @@ from pgptracker.qiime.export_module import export_qza_files
 import subprocess
 from pathlib import Path
 from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
+from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
+from pgptracker.picrust.hsp_prediction import predict_gene_content 
+from pgptracker.picrust.metagenome_picrust2 import run_metagenome_pipeline 
 # Will be implemented in next artifacts
 # from pgptracker.interactive import run_interactive_mode
-# from pgptracker.picrust.phylo import build_phylogenetic_tree
-
 
 def setup_command(args: argparse.Namespace) -> int:
     """
@@ -257,7 +258,13 @@ def process_command(args: argparse.Namespace) -> int:
     output_dir_str = args.output
     if output_dir_str is None:
         from datetime import date
-        output_dir_str = f"results/run_{date.today():%Y-%m-%d}"
+        output_dir_str = f"results/run_{date.today():%d-%m-%Y}"
+
+    # Determine threads
+    # Use detect_available_cores() from env_manager if -t is not set
+    threads = args.threads or detect_available_cores()
+    print(f"Using {threads} threads for processing.")
+    print(f"Setting Max NSTI to: {args.max_nsti}")
 
     # Validate input files
     print("Step 1/6: Validating input files...")
@@ -277,31 +284,57 @@ def process_command(args: argparse.Namespace) -> int:
     print("Step 2/6: Exporting files to standard formats...")
     try:
         exported = export_qza_files(inputs, inputs['output'])
-        print()
     except (RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[EXPORT ERROR] Export failed: {e}", file=sys.stderr)
         return 1
     
+    # Define PICRUSt2 output directory
+    picrust_dir = inputs['output'] / "picrust2_intermediates"
+    
     # Build phylogenetic tree (PICRUSt2)
     print("Step 3/6: Building phylogenetic tree...")
-    print(f"  -> Using sequences: {exported['sequences']}") # Usando o .fna exportado
-    print("  -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
-    # Will be implemented in picrust/phylo.py
-    print()
+    print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
+    print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
+    try:
+        phylo_tree_path = build_phylogenetic_tree(
+            sequences_path=exported['sequences'],
+            output_dir=picrust_dir,
+            threads=threads
+        )
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[PHYLO ERROR] Phylogenetic tree build failed: {e}", file=sys.stderr)
+        return 1
     
     # Predict gene content (PICRUSt2)
     print("Step 4/6: Predicting gene content...")
     print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
     print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
-    # Will be implemented in picrust/predict.py
-    print()
+    try:
+        # TODO: Add logic to pass chunk_size from args if needed
+        predicted_paths = predict_gene_content(
+            tree_path=phylo_tree_path,
+            output_dir=picrust_dir,
+            threads=threads
+        )
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[PREDICT ERROR] Gene prediction failed: {e}", file=sys.stderr)
+        return 1
     
     # Normalize abundances (PICRUSt2)
     print("Step 5/6: Normalizing abundances...")
-    print(f"  -> Using table: {exported['table']}") # Usando o .biom exportado
-    print("  -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
-    # Will be implemented in picrust/normalize.py
-    print()
+    print(f" -> Using table: {exported['table']}") # Using the .biom exported
+    print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
+    try:
+        pipeline_outputs = run_metagenome_pipeline(
+            table_path=exported['table'],
+            marker_path=predicted_paths['marker'],
+            ko_predicted_path=predicted_paths['ko'],
+            output_dir=picrust_dir,
+            max_nsti=args.max_nsti
+        )
+    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[PIPELINE ERROR] Metagenome pipeline failed: {e}", file=sys.stderr)
+        return 1
     
     # Generate PGPT tables
     print("Step 6/6: Generating PGPT tables...")
