@@ -8,13 +8,71 @@ to assign taxonomy to representative sequences.
 import subprocess
 from pathlib import Path
 import importlib.resources
+import requests
+import appdirs
+from typing import Optional
+from tqdm import tqdm
 from pgptracker.utils.env_manager import run_command
 from pgptracker.utils.validator import ValidationError # Usaremos para validação de output
+
+CLASSIFIER_URL = "https://ftp.microbio.me/greengenes_release/2024.09/2024.09.taxonomy.asv.tsv.qza"
+CLASSIFIER_FILENAME = "2024.09.taxonomy.asv.tsv.qza"
+APP_NAME = "PGPTracker"
+APP_AUTHOR = "PGPTracker"
+
+def _get_cache_dir() -> Path:
+    """Finds the user-specific cache directory for PGPTracker."""
+    cache_dir = Path(appdirs.user_cache_dir(APP_NAME, APP_AUTHOR))
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    return cache_dir
+
+def _get_default_classifier() -> Path:
+    """
+    Gets the path to the default classifier, downloading it if it doesn't exist.
+    """
+    cache_dir = _get_cache_dir()
+    classifier_path = cache_dir / CLASSIFIER_FILENAME
+    
+    if classifier_path.exists():
+        print(f"  -> Found default classifier in cache: {classifier_path}")
+        return classifier_path
+
+    print(f"  -> Default classifier not found. Downloading to cache:\n     {classifier_path}")
+    
+    try:
+        with requests.get(CLASSIFIER_URL, stream=True) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get('content-length', 0))
+            
+            progress_bar = tqdm(
+                total=total_size, 
+                unit='iB', 
+                unit_scale=True,
+                desc="Downloading Greengenes"
+            )
+            
+            with open(classifier_path, 'wb') as f:
+                for chunk in r.iter_content(chunk_size=8192): 
+                    progress_bar.update(len(chunk))
+                    f.write(chunk)
+            progress_bar.close()
+
+        if total_size != 0 and progress_bar.n != total_size:
+            raise IOError("Download incomplete.")
+
+        print("  -> Download complete.")
+        return classifier_path
+
+    except Exception as e:
+        print(f"  [ERROR] Failed to download classifier: {e}")
+        if classifier_path.exists():
+            classifier_path.unlink() # Remove arquivo incompleto
+        raise RuntimeError(f"Failed to download default classifier from {CLASSIFIER_URL}") from e
 
 def classify_taxonomy(
     rep_seqs_path: Path,
     seq_format: str,
-    classifier_qza: Path,
+    classifier_qza_path: Optional[Path],
     output_dir: Path,
     threads: int
 ) -> Path:
@@ -25,7 +83,7 @@ def classify_taxonomy(
     Args:
         rep_seqs_path: Path to representative sequences (.qza) from the user.
         seq_format: The format of the sequences ('qza' or 'fasta').
-        classifier_qza: Path to the QIIME2 classifier artifact (.qza).
+        classifier_qza_path: Path to a custom classifier. If None, downloads default.
         output_dir: The main output directory for this run.
         threads: Number of threads to use.
 
@@ -35,6 +93,24 @@ def classify_taxonomy(
     Raises:
         ValidationError: If any step fails to produce the expected output.
     """
+    # Resolve classifier path
+    classifier_to_use = None
+    try:
+        if classifier_qza_path:
+            # 1. Usuário forneceu um customizado
+            print(f"  -> Using custom classifier from: {classifier_qza_path}")
+            if not classifier_qza_path.exists():
+                    raise FileNotFoundError(f"Custom classifier not found: {classifier_qza_path}")
+            classifier_to_use = classifier_qza_path
+        else:
+            # 2. Usuário NÃO forneceu. Baixar/encontrar o default.
+            print("  -> No custom classifier provided. Checking for default classifier...")
+            classifier_to_use = _get_default_classifier()
+
+    except (RuntimeError, IOError, FileNotFoundError) as e:
+        print(f"\n[CLASSIFIER ERROR] Failed to get classifier: {e}", file=sys.stderr)
+        # Re-lança o erro para o cli.py pegar
+        raise RuntimeError("Failed to resolve classifier path.") from e
 
     # Import sequences to .qza if needed
     rep_seqs_qza_to_use = None
@@ -82,7 +158,7 @@ def classify_taxonomy(
     cmd_classify = [
         "qiime", "feature-classifier", "classify-sklearn",
         "--i-reads", str(rep_seqs_qza_to_use),
-        "--i-classifier", str(classifier_qza),
+        "--i-classifier", str(classifier_to_use),
         "--o-classification", str(classified_qza),
         "--p-n-jobs", str(threads)
     ]

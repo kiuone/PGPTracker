@@ -16,6 +16,7 @@ from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.qiime.export_module import export_qza_files
 import subprocess
 from datetime import date
+from pathlib import Path
 from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP, detect_available_cores, detect_available_memory
 from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
 from pgptracker.picrust.hsp_prediction import predict_gene_content 
@@ -386,7 +387,7 @@ def process_command(args: argparse.Namespace) -> int:
         taxonomy_path = classify_taxonomy(
          rep_seqs_path=inputs['sequences'],    
          seq_format=inputs['seq_format'],      
-         classifier_qza=classifier_to_use, 
+         classifier_qza_path=Path(args.classifier_qza) if args.classifier_qza else None, 
          output_dir=inputs['output'], # Save in /output/taxonomy/
          threads=threads
         )
