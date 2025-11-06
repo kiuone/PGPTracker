@@ -195,7 +195,7 @@ Raises:
                 lines = f_in.readlines()
 
         # Substitues the first line in the header
-        lines[0] = "#OTUID\ttaxonomy\tconfidence\n"
+        lines[0] = "OTU/ASV_ID\ttaxonomy\tconfidence\n"
 
         with open(final_taxonomy_tsv, 'w') as f_out:
                 f_out.writelines(lines)

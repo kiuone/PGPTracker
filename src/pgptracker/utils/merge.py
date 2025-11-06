@@ -20,13 +20,12 @@ def _process_taxonomy_polars(df_lazy: pl.LazyFrame) -> pl.LazyFrame:
     Tasks:
     1. Split 'taxonomy' into Kingdom, Phylum, etc.
     2. Clean prefixes (e.g., 'k__')
-    3. Reorder columns to: ASV_ID | Tax | Samples...
+    3. Reorder columns to: OTU/ASV_ID | Tax | Samples...
     """
     # Define standard taxonomic levels
     tax_levels = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
     
     # 1. Split taxonomy string 'k__Bacteria; p__Firmicutes; ...'
-    print("    -> Defining lazy logic for taxonomy splitting...")
     df_lazy = df_lazy.with_columns(
         pl.col('taxonomy').str.split('; ').alias('tax_split')
     )
@@ -35,7 +34,8 @@ def _process_taxonomy_polars(df_lazy: pl.LazyFrame) -> pl.LazyFrame:
     for i, level_name in enumerate(tax_levels):
         df_lazy = df_lazy.with_columns(
             pl.col('tax_split')
-            .list.get(i)
+            .list.slice(i, 1)
+            .list.first()
             .str.replace(r"^[kpcofgs]__", "") # Clean prefix
             .alias(level_name)
         )
@@ -51,15 +51,15 @@ def _process_taxonomy_polars(df_lazy: pl.LazyFrame) -> pl.LazyFrame:
 
     # 3. Reorder columns
     # Get sample columns (all columns not in the sets below)
-    tax_and_helpers = set(tax_levels) | {'ASV_ID', 'taxonomy', 'confidence', 'tax_split'}
+    tax_and_helpers = set(tax_levels) | {'OTU/ASV_ID', 'taxonomy', 'confidence', 'tax_split'}
     
     # We must 'collect_schema' to know all column names for reordering
     all_cols = df_lazy.collect_schema().names()
     
     sample_cols = [col for col in all_cols if col not in tax_and_helpers]
     
-    # New order: ASV_ID, then taxonomy, then all sample columns
-    new_order = ['ASV_ID'] + tax_levels + sample_cols
+    # New order: OTU/ASV_ID, then taxonomy, then all sample columns
+    new_order = ['OTU/ASV_ID'] + tax_levels + sample_cols
     
     # Select the final columns in the correct order
     df_lazy = df_lazy.select(new_order)
@@ -96,14 +96,12 @@ def merge_taxonomy_to_table(
     try:
         # Step 1: Unzip 'seqtab_norm.tsv.gz' (o 'gunzip -c')
         if not raw_merged_tsv.exists():
-            print("  -> Unzipping normalized table...")
             with gzip.open(seqtab_norm_gz, 'rb') as f_in:
                 with open(seqtab_tsv, 'wb') as f_out:
                     shutil.copyfileobj(f_in, f_out)
             _validate_output(seqtab_tsv, "gunzip", "unzipped sequence table")
 
             # Step 2: Converts TSV -> BIOM (o 'biom convert') 
-            print("  -> Converting normalized table to BIOM format...")
             cmd_convert1 = [
                 "biom", "convert",
                 "-i", str(seqtab_tsv),
@@ -115,8 +113,7 @@ def merge_taxonomy_to_table(
             run_command("PGPTracker", cmd_convert1, check=True, capture_output=True)
             _validate_output(seqtab_biom, "biom convert", "normalized BIOM table")
 
-            # Step 3: Adds metadata (o 'biom add-metadata') ---
-            print("  -> Merging taxonomy into BIOM table...")
+            # Step 3: Adds metadata (o 'biom add-metadata') 
             cmd_merge = [
                 "biom", "add-metadata",
                 "-i", str(seqtab_biom),
@@ -127,8 +124,7 @@ def merge_taxonomy_to_table(
             run_command("PGPTracker", cmd_merge, check=True, capture_output=True)
             _validate_output(merged_biom, "biom add-metadata", "merged BIOM table")
 
-            # Step 4: Converts BIOM -> TSV (o 'biom convert' final) ---
-            print("  -> Converting final BIOM table to TSV...")
+            # Step 4: Converts BIOM -> TSV (o 'biom convert' final)
             cmd_convert2 = [
                 "biom", "convert",
                 "-i", str(merged_biom),
@@ -139,18 +135,13 @@ def merge_taxonomy_to_table(
             _validate_output(raw_merged_tsv, "biom convert", "raw merged TSV")
         
         # Step 5: Process with Polars
-        print("  -> Lazily scanning raw merged table with Polars...")
         # Scan the file (lazy)
         df_lazy = pl.scan_csv(raw_merged_tsv, separator='\t', skip_rows=1)
-        
-        # Rename the OTU ID column (lazy)
-        df_lazy = df_lazy.rename({'#OTUID': 'ASV_ID'})
         
         # Call the lazy processing helper function
         processed_lazy = _process_taxonomy_polars(df_lazy)
         
         # Step 6: Print Snippets
-        print("  -> Executing query for data snippets...")
         try:
             # Get 3x3 head
             print("\n--- Data Head (First 3 ASVs, First 3 Columns) ---")
@@ -169,15 +160,13 @@ def merge_taxonomy_to_table(
             print(f"  [Warning] Could not print data snippets: {e}")
 
         # Step 7: Write final processed table to disk
-        print(f"  -> Streaming processed table to: {final_processed_tsv} ...")
-        # This is the key:
         # 1. collect(engine="streaming") processes the file in chunks (solves RAM issue)
         # 2. write_csv() saves the result
         processed_lazy.collect(engine="streaming").write_csv(final_processed_tsv, separator='\t')
         
         _validate_output(final_processed_tsv, "Polars Processing", "final processed table")
 
-    except (subprocess.CalledProcessError, ValidationError, gzip.BadGzipFile) as e:
+    except (subprocess.CalledProcessError, ValidationError, gzip.BadGzipFile, FileNotFoundError, OSError) as e:
         print(f"  [ERROR] BIOM merging pipeline failed: {e}")
         raise RuntimeError("BIOM merging pipeline failed.") from e
     except Exception as e:

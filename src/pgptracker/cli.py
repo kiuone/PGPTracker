@@ -26,8 +26,6 @@ from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 from pgptracker import pipeline
 from pgptracker import subcommands
 from pgptracker.interactive import run_interactive_mode
-# Will be implemented in next artifacts
-# from pgptracker.interactive import run_interactive_mode
 
 def setup_command(args: argparse.Namespace) -> int:
     """
@@ -271,7 +269,7 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
         
     # Call the core pipeline logic
-    print("PGPTracker - Full Process Pipeline (Stage 1)")
+    print("\nPGPTracker - Full Process Pipeline (Stage 1)")
     print()
     return pipeline.run_pipeline(args)
 

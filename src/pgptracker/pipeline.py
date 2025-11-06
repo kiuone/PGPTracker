@@ -22,6 +22,7 @@ from pgptracker.picrust.hsp_prediction import predict_gene_content
 from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
 from pgptracker.qiime.classify import classify_taxonomy
 from pgptracker.utils.merge import merge_taxonomy_to_table
+from pgptracker.utils.validator import ValidationError
 
 def run_pipeline(args: argparse.Namespace) -> int:
     """
@@ -40,7 +41,6 @@ def run_pipeline(args: argparse.Namespace) -> int:
     RAM = detect_available_memory()
     print(f"Using {threads} threads for processing.")
     print(f"{RAM} of RAM available for processing.\n note: If the process get 'killed' it means you need more RAM.")
-    print(f"Setting Max NSTI to: {args.max_nsti}")
 
     # Validate input files
     print("\nStep 1/8: Validating input files...")
@@ -115,25 +115,6 @@ def run_pipeline(args: argparse.Namespace) -> int:
     
     # Classify taxonomy (QIIME2)
     print("\nStep 6/8: Classifying taxonomy...")
-    classifier_path_obj = None
-    if args.classifier_qza:
-        # 1. User gave a custom classifier
-        print(f"\n-> Using custom classifier from: {args.classifier_qza}")
-        classifier_path_obj = Path(args.classifier_qza)
-        # Note: classify_taxonomy will handle the .exists() check
-    else:
-        # 2. User didn't provide a classifier, use default bundled
-        print("\n-> Using default bundled Greengenes (2024.09) classifier.")
-        try:
-            classifier_path_obj = importlib.resources.files("pgptracker") / "databases" / "2024.09.taxonomy.asv.tsv.qza"
-            # We pass this 'Traversable' object directly
-        except FileNotFoundError:
-            print("[ERROR] Default classifier (2024.09.taxonomy.asv.tsv.qza) not found!", file=sys.stderr)
-            print("    This file should be bundled with PGPTracker.", file=sys.stderr)
-            print("    Ensure 'databases/*.qza' is in setup.py's package_data.", file=sys.stderr)
-            return 1
-        print(f" -> Classifier object: {classifier_path_obj}")
-        
     try:
         taxonomy_path = classify_taxonomy(
          rep_seqs_path=inputs['sequences'],    
@@ -145,11 +126,12 @@ def run_pipeline(args: argparse.Namespace) -> int:
     except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[TAXONOMY ERROR] Classification failed: {e}", file=sys.stderr)
         return 1
+    print("  -> Taxonomic classification successful.")
 
     # Merge taxonomy into feature table (BIOM)
     print("\nStep 7/8: Merging taxonomy into feature table...")
     try:
-        merged_table_path = merge_taxonomy_to_table(
+        merge_taxonomy_to_table(
             seqtab_norm_gz=pipeline_outputs['seqtab_norm'],
             taxonomy_tsv=taxonomy_path,
             output_dir=inputs['output'], # Save in /output/

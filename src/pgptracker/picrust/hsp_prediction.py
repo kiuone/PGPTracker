@@ -42,15 +42,10 @@ def _run_hsp_prediction(
         cmd.append("-n")
     
     # 2. Print execution details
-    print(f"  Input tree: {tree_path}")
-    print(f"  Output: {output_path}")
     print(f"  Type: {prediction_type}")
-    print(f"  Threads: {threads}")
     print(f"  Chunk size: {chunk_size}")
-    # print(f"  Calculate NSTI: {calculate_nsti}")
     
     # 3. Run command
-    # Using "Picrust2" (capitalized) as requested
     run_command("Picrust2", cmd, check=True)
     
     # 4. Validate output (inline validation)

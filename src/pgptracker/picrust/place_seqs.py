@@ -60,11 +60,7 @@ def build_phylogenetic_tree(
     
     # 5. Run command with attribution
     print("Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
-    print(f"  Input: {sequences_path}")
-    print(f"  Output: {output_tree}")
-    print(f"  Threads: {threads}")
-    print(f"  Algorithm: SEPP")
-    
+
     # Using "Picrust2" (capitalized) as requested
     run_command("Picrust2", cmd, check=True)
     

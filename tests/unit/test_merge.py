@@ -22,7 +22,6 @@ from pgptracker.utils.merge import merge_taxonomy_to_table, _process_taxonomy_po
 from pgptracker.utils.validator import ValidationError
 
 # --- Fixtures ---
-
 @pytest.fixture
 def mock_lazy_frame() -> pl.LazyFrame:
     """Provides a realistic Polars LazyFrame for taxonomy processing."""
@@ -102,17 +101,18 @@ def test_process_taxonomy_polars_logic(mock_lazy_frame):
 # --- Test 2: Orchestration (merge_taxonomy_to_table) ---
 
 @patch('pgptracker.utils.merge.shutil.rmtree')
-@patch('pgptracker.utils.merge.pl.LazyFrame.write_csv')
-@patch('pgptracker.utils.merge.pl.LazyFrame.collect')
+@patch('polars.DataFrame.write_csv')
 @patch('pgptracker.utils.merge._process_taxonomy_polars')
 @patch('pgptracker.utils.merge.pl.scan_csv')
 @patch('pgptracker.utils.merge._validate_output')
 @patch('pgptracker.utils.merge.run_command')
 @patch('pgptracker.utils.merge.shutil.copyfileobj')
 @patch('pgptracker.utils.merge.gzip.open')
+@patch('pathlib.Path.exists')
 def test_merge_taxonomy_happy_path_with_cleanup(
+    mock_exists,
     mock_gzip_open, mock_copy, mock_run_command, mock_validate,
-    mock_scan_csv, mock_process_tax, mock_collect, mock_write_csv,
+    mock_scan_csv, mock_process_tax, mock_write_csv,
     mock_rmtree, mock_paths
 ):
     """
@@ -121,16 +121,24 @@ def test_merge_taxonomy_happy_path_with_cleanup(
     and cleanup is enabled.
     """
     # Arrange
-    # Mock all I/O functions
-    mock_paths["raw_merged_tsv"].exists.return_value = False # Force BIOM steps
+    mock_exists.side_effect = [False, True, True, True, True, True]
+    
     mock_lazy_frame = Mock(spec=pl.LazyFrame)
     mock_lazy_frame.rename.return_value = mock_lazy_frame
-    mock_processed_frame = Mock(spec=pl.LazyFrame)
-    mock_collected_frame = Mock()
+    # This is the mock for the *final* lazy frame
+    mock_processed_frame = Mock(spec=pl.LazyFrame) 
+    # This is the mock for the *eager* frame, returned by .collect()
+    mock_collected_frame = Mock(spec=pl.DataFrame)
+    mock_collected_frame.write_csv = mock_write_csv # Attach write_csv mock
+    # to return the mock_collected_frame
+    mock_processed_frame.collect = Mock(return_value=mock_collected_frame)
+    # Configure the mock chain for snippet printing
+    # This chain (.head().select().collect()) returns a simple mock
+    mock_processed_frame.head.return_value.select.return_value.collect.return_value = Mock()
+    mock_processed_frame.tail.return_value.select.return_value.collect.return_value = Mock()
 
     mock_scan_csv.return_value = mock_lazy_frame
     mock_process_tax.return_value = mock_processed_frame
-    mock_processed_frame.collect.return_value = mock_collected_frame
 
     # Act
     result_path = merge_taxonomy_to_table(
@@ -141,40 +149,32 @@ def test_merge_taxonomy_happy_path_with_cleanup(
     )
 
     # Assert
-    # 1. Check final path
     assert result_path == mock_paths["final_tsv"]
-    
-    # 2. Check BIOM pipeline was called
     assert mock_gzip_open.called
     assert mock_run_command.call_count == 3
-    
-    # 3. Check Polars pipeline was called
     mock_scan_csv.assert_called_once_with(mock_paths["raw_merged_tsv"], separator='\t', skip_rows=1)
-    mock_lazy_frame.rename.assert_called_once_with({'#OTUID': 'ASV_ID'})
     mock_process_tax.assert_called_once_with(mock_lazy_frame)
     
-    # 4. Check Polars streaming save
+    # Corrected: Assert the call was made on the mock_processed_frame
     mock_processed_frame.collect.assert_called_with(engine="streaming")
     mock_collected_frame.write_csv.assert_called_once_with(mock_paths["final_tsv"], separator='\t')
 
-    # 5. Check validation
-    assert mock_validate.call_count == 5 # 1 gunzip + 3 biom + 1 polars
-
-    # 6. Check cleanup
+    assert mock_validate.call_count == 5
     mock_rmtree.assert_called_once_with(mock_paths["work_dir"])
 
 @patch('pgptracker.utils.merge.shutil.rmtree')
-@patch('pgptracker.utils.merge.pl.LazyFrame.write_csv')
-@patch('pgptracker.utils.merge.pl.LazyFrame.collect')
+@patch('polars.DataFrame.write_csv')
 @patch('pgptracker.utils.merge._process_taxonomy_polars')
 @patch('pgptracker.utils.merge.pl.scan_csv')
 @patch('pgptracker.utils.merge._validate_output')
 @patch('pgptracker.utils.merge.run_command')
 @patch('pgptracker.utils.merge.shutil.copyfileobj')
 @patch('pgptracker.utils.merge.gzip.open')
+@patch('pathlib.Path.exists')
 def test_merge_taxonomy_skip_biom_and_save_intermediates(
+    mock_exists,
     mock_gzip_open, mock_copy, mock_run_command, mock_validate,
-    mock_scan_csv, mock_process_tax, mock_collect, mock_write_csv,
+    mock_scan_csv, mock_process_tax, mock_write_csv,
     mock_rmtree, mock_paths
 ):
     """
@@ -182,16 +182,24 @@ def test_merge_taxonomy_skip_biom_and_save_intermediates(
     and save_intermediates=True.
     """
     # Arrange
-    # Mock all I/O functions
-    mock_paths["raw_merged_tsv"].exists.return_value = True # Skip BIOM steps
+    mock_exists.side_effect = [True, True]
+    
     mock_lazy_frame = Mock(spec=pl.LazyFrame)
     mock_lazy_frame.rename.return_value = mock_lazy_frame
     mock_processed_frame = Mock(spec=pl.LazyFrame)
-    mock_collected_frame = Mock()
+    
+    mock_collected_frame = Mock(spec=pl.DataFrame)
+    mock_collected_frame.write_csv = mock_write_csv
+    
+    # Corrected: Configure the .collect method
+    mock_processed_frame.collect = Mock(return_value=mock_collected_frame)
+    
+    # Configure mock chain for snippets
+    mock_processed_frame.head.return_value.select.return_value.collect.return_value = Mock()
+    mock_processed_frame.tail.return_value.select.return_value.collect.return_value = Mock()
 
     mock_scan_csv.return_value = mock_lazy_frame
     mock_process_tax.return_value = mock_processed_frame
-    mock_processed_frame.collect.return_value = mock_collected_frame
 
     # Act
     result_path = merge_taxonomy_to_table(
@@ -202,28 +210,43 @@ def test_merge_taxonomy_skip_biom_and_save_intermediates(
     )
 
     # Assert
-    # 1. Check BIOM pipeline was *not* called
     assert not mock_gzip_open.called
     assert mock_run_command.call_count == 0
-    
-    # 2. Check Polars pipeline *was* called
     mock_scan_csv.assert_called_once_with(mock_paths["raw_merged_tsv"], separator='\t', skip_rows=1)
     mock_process_tax.assert_called_once_with(mock_lazy_frame)
-    mock_processed_frame.collect.assert_called_with(engine="streaming")
     
-    # 3. Check validation
-    # Only the final validation should be called
+    # Corrected: Assert the call on the mock object
+    mock_processed_frame.collect.assert_called_with(engine="streaming")
+    mock_collected_frame.write_csv.assert_called_once_with(mock_paths["final_tsv"], separator='\t')
+
     mock_validate.assert_called_once_with(
         mock_paths["final_tsv"], "Polars Processing", "final processed table"
     )
-
-    # 4. Check cleanup
     mock_rmtree.assert_not_called()
 
-@patch('pgptracker.utils.merge.run_command', Mock(side_effect=CalledProcessError(1, "cmd")))
-def test_merge_taxonomy_biom_fails(mock_paths):
+@patch('pathlib.Path.exists')
+@patch('pgptracker.utils.merge.gzip.open')
+@patch('pgptracker.utils.merge.run_command')
+def test_merge_taxonomy_biom_fails(
+    mock_run_command, mock_gzip_open, mock_exists, mock_paths
+):
     """Tests that a failure in run_command raises RuntimeError."""
-    mock_paths["raw_merged_tsv"].exists.return_value = False
+    
+    # 1. raw_merged_tsv.exists() -> False (to enter the if-block)
+    # 2. _validate_output(seqtab_tsv, ...) -> True (to pass validation)
+    mock_exists.side_effect = [
+        False,  # Call 1: if not raw_merged_tsv.exists()
+        True    # Call 2: _validate_output(seqtab_tsv, ...) -> path.exists()
+    ]
+    
+    # Configure the gzip mock to simulate reading bytes
+    mock_gzip_open.return_value.__enter__.return_value.read.side_effect = [
+        b"mock gzip data", 
+        b"" # Empty bytes signals EOF
+    ]
+    
+    # This mock will be called *after* gzip open and validation succeed
+    mock_run_command.side_effect = CalledProcessError(1, "cmd", stderr="BIOM FAILED")
     
     with pytest.raises(RuntimeError, match="BIOM merging pipeline failed."):
         merge_taxonomy_to_table(
@@ -231,12 +254,20 @@ def test_merge_taxonomy_biom_fails(mock_paths):
             mock_paths["taxonomy_tsv"],
             mock_paths["output_dir"]
         )
+    
+    # Ensure it failed because run_command was called and failed
+    assert mock_run_command.called
 
-@patch('pgptracker.utils.merge.run_command', Mock())
-@patch('pgptracker.utils.merge.pl.scan_csv', Mock(side_effect=Exception("Polars failed")))
-def test_merge_taxonomy_polars_fails(mock_paths):
+@patch('pathlib.Path.exists')
+@patch('pgptracker.utils.merge.run_command')
+@patch('pgptracker.utils.merge.pl.scan_csv')
+def test_merge_taxonomy_polars_fails(
+    mock_scan_csv, mock_run_command, mock_exists, mock_paths
+):
     """Tests that a failure in Polars processing raises RuntimeError."""
-    mock_paths["raw_merged_tsv"].exists.return_value = True # Skip BIOM
+    mock_exists.return_value = True # Skip BIOM
+    
+    mock_scan_csv.side_effect = Exception("Polars failed")
     
     with pytest.raises(RuntimeError, match="Taxonomy processing failed."):
         merge_taxonomy_to_table(
@@ -244,3 +275,5 @@ def test_merge_taxonomy_polars_fails(mock_paths):
             mock_paths["taxonomy_tsv"],
             mock_paths["output_dir"]
         )
+    # Ensure BIOM commands were not called
+    assert not mock_run_command.called
