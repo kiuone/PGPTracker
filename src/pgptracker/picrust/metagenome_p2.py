@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict
 from pgptracker.utils.env_manager import run_command
 import subprocess # Keep subprocess for CalledProcessError
+from pgptracker.utils.validator import validate_output_file as _validate_output
 
 
 def run_metagenome_pipeline(
@@ -92,19 +93,8 @@ def run_metagenome_pipeline(
     pred_unstrat = metagenome_out_dir / "pred_metagenome_unstrat.tsv.gz"
     
     # 8. Validate outputs (inline validation)
-    for path, name in [
-        (seqtab_norm, "Normalized sequence table"),
-        (pred_unstrat, "Unstratified metagenome predictions")
-    ]:
-        if not path.exists():
-            raise FileNotFoundError(
-                f"metagenome_pipeline.py did not create {name}: {path}"
-            )
-        
-        if path.stat().st_size == 0:
-            raise RuntimeError(
-                f"metagenome_pipeline.py created empty {name}: {path}"
-            )
+    _validate_output(seqtab_norm, "metagenome_pipeline.py", "normalized sequence table")
+    _validate_output(pred_unstrat, "metagenome_pipeline.py", "unstratified metagenome predictions")
     
     print(f"Metagenome pipeline completed:")
     print(f"  Normalized table: {seqtab_norm}")

@@ -263,7 +263,6 @@ def process_command(args: argparse.Namespace) -> int:
         print("ERROR: Interactive mode not yet implemented", file=sys.stderr)
         return 1
     # Non-interactive mode requires both input files
-    # Only happens if not in interactive mode
     elif not args.rep_seqs or not args.feature_table:
         print("ERROR: --rep-seqs and --feature-table are required in non-interactive mode", file=sys.stderr)
         print("       Use --interactive for guided prompts", file=sys.stderr)
@@ -283,7 +282,7 @@ def process_command(args: argparse.Namespace) -> int:
     print(f"Setting Max NSTI to: {args.max_nsti}")
 
     # Validate input files
-    print("Step 1/8: Validating input files...")
+    print("\nStep 1/8: Validating input files...")
     try:
         inputs = validate_inputs(args.rep_seqs, args.feature_table, output_dir_str)
         print(f"  -> Representative sequences: {inputs['sequences']}")
@@ -297,7 +296,7 @@ def process_command(args: argparse.Namespace) -> int:
     print()
     
     # Export .qza files if needed
-    print("Step 2/8: Exporting files to standard formats...")
+    print("\nStep 2/8: Exporting files to standard formats...")
     try:
         exported = export_qza_files(inputs, inputs['output'])
     except (RuntimeError, subprocess.CalledProcessError) as e:
@@ -308,7 +307,7 @@ def process_command(args: argparse.Namespace) -> int:
     picrust_dir = inputs['output'] / "picrust2_intermediates"
     
     # Build phylogenetic tree (PICRUSt2)
-    print("Step 3/8: Building phylogenetic tree...")
+    print("\nStep 3/8: Building phylogenetic tree...")
     print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
     print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
     try:
@@ -322,7 +321,7 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Predict gene content (PICRUSt2)
-    print("Step 4/8: Predicting gene content...")
+    print("\nStep 4/8: Predicting gene content...")
     print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
     print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
     try:
@@ -338,7 +337,7 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Normalize abundances (PICRUSt2)
-    print("Step 5/8: Normalizing abundances...")
+    print("\nStep 5/8: Normalizing abundances...")
     print(f" -> Using table: {exported['table']}") # Using the .biom exported
     print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
     try:
@@ -354,35 +353,26 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Classify taxonomy (QIIME2)
-    print("Step 6/8: Classifying taxonomy...")
-    classifier_to_use = None
+    print("\nStep 6/8: Classifying taxonomy...")
+    classifier_path_obj = None
     if args.classifier_qza:
         # 1. User gave a custom classifier
         print(f"\n-> Using custom classifier from: {args.classifier_qza}")
-        classifier_to_use = Path(args.classifier_qza)
-
-        # Validate custom classifier exists
-        if not classifier_to_use.exists():
-            print(f"[ERROR] Custom classifier file not found: {classifier_to_use}", file=sys.stderr)
-            return 1
+        classifier_path_obj = Path(args.classifier_qza)
+        # Note: classify_taxonomy will handle the .exists() check
     else:
         # 2. User didn't provide a classifier, use default bundled
         print("\n-> Using default bundled Greengenes (2024.09) classifier.")
         try:
-            clf_path_obj = importlib.resources.files("pgptracker") / "databases" / "2024.09.taxonomy.asv.tsv.qza"
-            with importlib.resources.as_file(clf_path_obj) as real_path:
-                classifier_to_use = real_path
-
-            if not classifier_to_use.exists(): 
-                raise FileNotFoundError 
-
+            classifier_path_obj = importlib.resources.files("pgptracker") / "databases" / "2024.09.taxonomy.asv.tsv.qza"
+            # We pass this 'Traversable' object directly
         except FileNotFoundError:
             print("[ERROR] Default classifier (2024.09.taxonomy.asv.tsv.qza) not found!", file=sys.stderr)
-            print("         This file should be bundled with PGPTracker.", file=sys.stderr)
-            print("         Ensure 'databases/*.qza' is in setup.py's package_data.", file=sys.stderr)
+            print("    This file should be bundled with PGPTracker.", file=sys.stderr)
+            print("    Ensure 'databases/*.qza' is in setup.py's package_data.", file=sys.stderr)
             return 1
-        print(f"   -> Classifier path: {classifier_to_use}")
-
+        print(f" -> Classifier object: {classifier_path_obj}")
+        
     try:
         taxonomy_path = classify_taxonomy(
          rep_seqs_path=inputs['sequences'],    
@@ -409,11 +399,10 @@ def process_command(args: argparse.Namespace) -> int:
         return 1
     
     # Generate PGPT tables
-    print("Step 8/8: Generating PGPT tables...")
+    print("\nStep 8/8: Generating PGPT tables...")
     print("  -> Mapping KOs to PGPTs using PLaBA database")
     # Will be implemented in analysis/pgpt.py
-
-
+    # For now, just print success message
     print("Pipeline completed successfully!")
     print(f"Results saved to: {inputs['output']}")
     

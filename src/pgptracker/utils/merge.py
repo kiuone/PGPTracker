@@ -9,6 +9,7 @@ import shutil
 from pathlib import Path
 from pgptracker.utils.env_manager import run_command
 from pgptracker.utils.validator import ValidationError
+from pgptracker.utils.validator import validate_output_file as _validate_output
 
 def merge_taxonomy_to_table(
     seqtab_norm_gz: Path,
@@ -54,8 +55,7 @@ def merge_taxonomy_to_table(
         with gzip.open(seqtab_norm_gz, 'rb') as f_in:
             with open(seqtab_tsv, 'wb') as f_out:
                 shutil.copyfileobj(f_in, f_out)
-        if not seqtab_tsv.exists() or seqtab_tsv.stat().st_size == 0:
-            raise ValidationError("Failed to unzip seqtab_norm.tsv.gz")
+        _validate_output(seqtab_tsv, "gunzip", "unzipped sequence table")
 
         # Step 2: Converts TSV -> BIOM (o 'biom convert') 
         print("  -> Converting normalized table to BIOM format...")
@@ -68,8 +68,7 @@ def merge_taxonomy_to_table(
         ]
         # 'biom' is in 'pgptracker' environment
         run_command("PGPTracker", cmd_convert1, check=True)
-        if not seqtab_biom.exists():
-            raise ValidationError("biom convert (step 1) failed")
+        _validate_output(seqtab_biom, "biom convert", "normalized BIOM table")
 
         # Step 3: Adds metadata (o 'biom add-metadata') ---
         print("  -> Merging taxonomy into BIOM table...")
@@ -81,8 +80,7 @@ def merge_taxonomy_to_table(
             "--sc-separated", "taxonomy"
         ]
         run_command("PGPTracker", cmd_merge, check=True)
-        if not merged_biom.exists():
-            raise ValidationError("biom add-metadata failed")
+        _validate_output(merged_biom, "biom add-metadata", "merged BIOM table")
 
         # Step 4: Converts BIOM -> TSV (o 'biom convert' final) ---
         print("  -> Converting final BIOM table to TSV...")
@@ -93,8 +91,7 @@ def merge_taxonomy_to_table(
             "--to-tsv"
         ]
         run_command("PGPTracker", cmd_convert2, check=True)
-        if not final_tsv.exists() or final_tsv.stat().st_size == 0:
-            raise ValidationError("biom convert (step 2) failed")
+        _validate_output(final_tsv, "biom convert", "final merged table")
 
     except (subprocess.CalledProcessError, ValidationError, gzip.BadGzipFile) as e:
         print(f"  [ERROR] BIOM merging pipeline failed: {e}")

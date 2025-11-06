@@ -12,6 +12,7 @@ import multiprocessing
 from pathlib import Path
 from typing import List, Optional, Dict
 from functools import lru_cache
+from datetime import date
 
 # Environment mapping
 ENV_MAP = {
@@ -163,6 +164,21 @@ def run_command(
     
     return result
 
+def get_output_dir(args_output: Optional[str]) -> Path:
+    """
+    Gets the validated output directory Path based on user input.
+    Defaults to 'results/run_YYYY-MM-DD' if not provided.
+    """
+    if args_output:
+        return Path(args_output)
+    # Default name
+    return Path(f"results/run_{date.today():%d-%m-%Y}")
+
+def get_threads(args_threads: Optional[int]) -> int:
+    """
+    Gets the number of threads to use, auto-detecting if not specified.
+    """
+    return args_threads or detect_available_cores()
 
 def get_system_resources() -> Dict[str, any]:
     """

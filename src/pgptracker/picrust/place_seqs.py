@@ -10,29 +10,8 @@ File originally named phylo.py
 from pathlib import Path
 from pgptracker.utils.env_manager import run_command
 import subprocess # Keep subprocess for CalledProcessError
+from pgptracker.utils.validator import validate_output_file as _validate_output
 
-def _validate_output(expected_path: Path, tool_name: str) -> None:
-    """
-    Validates that expected output file exists and is not empty.
-    (Local helper function to avoid extra utils file)
-    
-    Args:
-        expected_path: Path to expected output file
-        tool_name: Name of tool for error messages
-        
-    Raises:
-        FileNotFoundError: If file doesn't exist
-        RuntimeError: If file is empty
-    """
-    if not expected_path.exists():
-        raise FileNotFoundError(
-            f"{tool_name} did not create expected output: {expected_path}"
-        )
-    
-    if expected_path.stat().st_size == 0:
-        raise RuntimeError(
-            f"{tool_name} created empty output file: {expected_path}"
-        )
 
 def build_phylogenetic_tree(
     sequences_path: Path,
@@ -90,7 +69,7 @@ def build_phylogenetic_tree(
     run_command("Picrust2", cmd, check=True)
     
     # 6. Validate output
-    _validate_output(output_tree, "place_seqs.py")
+    _validate_output(output_tree, "place_seqs.py", "phylogenetic tree")
     
     print(f"Phylogenetic tree completed: {output_tree}")
     

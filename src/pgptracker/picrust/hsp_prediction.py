@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict
 from pgptracker.utils.env_manager import run_command
 import subprocess # Keep subprocess for CalledProcessError
+from pgptracker.utils.validator import validate_output_file as _validate_output
 
 def _run_hsp_prediction(
     prediction_type: str,
@@ -46,22 +47,14 @@ def _run_hsp_prediction(
     print(f"  Type: {prediction_type}")
     print(f"  Threads: {threads}")
     print(f"  Chunk size: {chunk_size}")
-    print(f"  Calculate NSTI: {calculate_nsti}")
+    # print(f"  Calculate NSTI: {calculate_nsti}")
     
     # 3. Run command
     # Using "Picrust2" (capitalized) as requested
     run_command("Picrust2", cmd, check=True)
     
     # 4. Validate output (inline validation)
-    if not output_path.exists():
-        raise FileNotFoundError(
-            f"hsp.py did not create expected output: {output_path}"
-        )
-    
-    if output_path.stat().st_size == 0:
-        raise RuntimeError(
-            f"hsp.py created empty output file: {output_path}"
-        )
+    _validate_output(output_path, "hsp.py", f"{prediction_type} prediction")
     
     print(f"  Prediction completed: {output_path}")
     

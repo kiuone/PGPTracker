@@ -109,7 +109,7 @@ def _run_export(
         "--output-path", str(temp_export_path)
     ]
 
-    run_command("qiime", cmd, check=True, capture_output=True)
+    run_command("qiime", cmd, check=True)
     
     # Verifies if the expected file exists
     exported_file = temp_export_path / expected_filename

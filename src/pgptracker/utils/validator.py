@@ -41,6 +41,35 @@ def _validate_file(path: Path, file_type: str, valid_extensions: List[str]) -> L
     
     return errors
 
+def validate_output_file(
+    path: Path,
+    tool_name: str,
+    file_description: str
+) -> None:
+    """
+    Validates that a tool's output file exists and is not empty.
+    (Replaces duplicated inline validation checks).
+
+    Args:
+    path: Path to the output file
+    tool_name: Name of the tool that created the file (for error messages)
+    file_description: Description of the file (e.g., "phylogenetic tree")
+
+    Raises:
+    FileNotFoundError: If file doesn't exist
+    RuntimeError: If file is empty
+    """
+    if not path.exists():
+        raise FileNotFoundError(
+        f"{tool_name} did not create {file_description}: {path}"
+    )
+
+    if path.stat().st_size == 0:
+        raise RuntimeError(
+        f"{tool_name} created empty {file_description}: {path}"
+    )
+
+
 def validate_inputs(
     rep_seqs: str,
     feature_table: str,

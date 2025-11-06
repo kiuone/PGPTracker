@@ -1,7 +1,6 @@
 # Core Dependencies
 pandas
 numpy
-# biopython>=1.81
 
 # Bioinformatics
 biom-format
@@ -21,15 +20,11 @@ plotly
 # gooey
 
 # Utilities
-# python-dotenv>=1.0.0
 pyyaml
 tqdm
+appdirs
 
 # Testing
 pytest
 pytest-cov
 pytest-mock
-
-# Development
-# black>=23.0.0
-# flake8>=6.0.0
