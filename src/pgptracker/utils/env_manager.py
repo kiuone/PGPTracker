@@ -180,39 +180,38 @@ def get_threads(args_threads: Optional[int]) -> int:
     """
     return args_threads or detect_available_cores()
 
-def get_system_resources() -> Dict[str, any]:
-    """
-    Gets available system resources.
+# def get_system_resources() -> Dict[str, any]:
+#     """
+#     Gets available system resources.
     
-    Returns:
-        dict: Dictionary with 'cores' and 'memory_gb' keys.
-    """
-    return {
-        'cores': detect_available_cores(),
-        'memory_gb': detect_available_memory()
-    }
+#     Returns:
+#         dict: Dictionary with 'cores' and 'memory_gb' keys.
+#     """
+#     return {
+#         'cores': detect_available_cores(),
+#         'memory_gb': detect_available_memory()
+#     }
 
-
-def print_system_info() -> None:
-    """
-    Prints system information including available resources.
-    """
-    resources = get_system_resources()
+# def print_system_info() -> None:
+#     """
+#     Prints system information including available resources.
+#     """
+#     resources = get_system_resources()
     
-    print("System Resources:")
-    print(f"  CPU Cores: {resources['cores']}")
+#     print("System Resources:")
+#     print(f"  CPU Cores: {resources['cores']}")
     
-    if resources['memory_gb'] > 0:
-        print(f"  Memory: {resources['memory_gb']} GB")
-    else:
-        print("  Memory: Unable to detect")
+#     if resources['memory_gb'] > 0:
+#         print(f"  Memory: {resources['memory_gb']} GB")
+#     else:
+#         print("  Memory: Unable to detect")
     
-    print()
-    print("Checking conda environments...")
+#     print()
+#     print("Checking conda environments...")
     
-    for tool, env_name in ENV_MAP.items():
-        exists = check_environment_exists(env_name)
-        status = "✓" if exists else "✗"
-        print(f"  {status} {env_name}")
+#     for tool, env_name in ENV_MAP.items():
+#         exists = check_environment_exists(env_name)
+#         status = "✓" if exists else "✗"
+#         print(f"  {status} {env_name}")
     
-    print()
+#     print()

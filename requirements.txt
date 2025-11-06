@@ -1,6 +1,7 @@
 # Core Dependencies
 pandas
 numpy
+polars
 
 # Bioinformatics
 biom-format

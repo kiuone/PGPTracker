@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 import appdirs
 import sys
+from importlib import resources
 from typing import Optional
 from tqdm import tqdm
 from pgptracker.utils.env_manager import run_command
@@ -95,26 +96,17 @@ Raises:
     """
     # Resolve classifier path
     classifier_to_use = None
-    is_packaged_classifier = False
-
     try:
-        if classifier_qza_path and isinstance(classifier_qza_path, Path):
-                # 1. User provided a custom classifier (Path)
-                print(f"   -> Using custom classifier from: {classifier_qza_path}")
-                if not classifier_qza_path.exists():
-                    raise FileNotFoundError(f"Custom classifier not found: {classifier_qza_path}")
-                classifier_obj_to_use = classifier_qza_path
-                is_packaged_classifier = False
-        elif classifier_qza_path:
-                # 2. Default classifier object (Traversable)
-                print("    -> Using default bundled Greengenes (2024.09) classifier.")
-                classifier_obj_to_use = classifier_qza_path
-                is_packaged_classifier = True
+        if classifier_qza_path:
+            # 1. User provided a custom classifier (Path)
+            print(f"  -> Using custom classifier from: {classifier_qza_path}")
+            if not classifier_qza_path.exists():
+                raise FileNotFoundError(f"Custom classifier not found: {classifier_qza_path}")
+            classifier_to_use = classifier_qza_path
         else:
-                # 3. Fallback: Download/cache (if cli.py logic failed)
-                print("    -> No classifier provided. Checking for default classifier...")
-                classifier_obj_to_use = _get_default_classifier()
-                is_packaged_classifier = False
+            # 2. User did NOT provide a path, get default (download or cache)
+            # Removed redundant print statement
+            classifier_to_use = _get_default_classifier()
 
     except (RuntimeError, IOError, FileNotFoundError) as e:
         print(f"\n[CLASSIFIER ERROR] Failed to get classifier: {e}", file=sys.stderr)
@@ -123,11 +115,9 @@ Raises:
     # Import sequences to .qza if needed
     rep_seqs_qza_to_use = None
     if seq_format == 'qza':
-        print("  -> Sequence format is .qza, proceeding.")
         rep_seqs_qza_to_use = rep_seqs_path
     else:
         # seq_format is'fasta', needs to import
-        print(f"     -> Input is .{seq_format}, importing to .qza for QIIME2...")
 
         # Defines a new path for the imported file
         classify_dir_temp = output_dir / "taxonomy" # Temp directory
@@ -142,7 +132,7 @@ Raises:
         ]
 
         try:
-                run_command("qiime", cmd_import, check=True)
+                run_command("qiime", cmd_import, check=True, capture_output=True)
         except subprocess.CalledProcessError as e:
                 print(f"   [ERROR] QIIME2 tools import failed: {e.stderr}", file=sys.stderr)
                 raise RuntimeError("Failed to import .fna to .qza") from e
@@ -165,38 +155,24 @@ Raises:
     print("    -> Running QIIME2 classify-sklearn (Bokulich et al., 2018)...")
 
     try:
-        # Handle both Path and Traversable objects
-        if is_packaged_classifier:
-            # It's a Traversable, use as_file context
-            with importlib.resources.as_file(classifier_obj_to_use) as classifier_real_path:
-                cmd_classify = [
-                        "qiime", "feature-classifier", "classify-sklearn",
-                        "--i-reads", str(rep_seqs_qza_to_use),
-                        "--i-classifier", str(classifier_real_path),
-                        "--o-classification", str(classified_qza),
-                        "--p-n-jobs", str(threads)
-                    ]
-                run_command("qiime", cmd_classify, check=True)
-        else:
-                # It's just a regular Path, use it directly
-                cmd_classify = [
-                    "qiime", "feature-classifier", "classify-sklearn",
-                    "--i-reads", str(rep_seqs_qza_to_use),
-                    "--i-classifier", str(classifier_obj_to_use),
-                    "--o-classification", str(classified_qza),
-                    "--p-n-jobs", str(threads)
-                ]
-                run_command("qiime", cmd_classify, check=True)
+        cmd_classify = [
+            "qiime", "feature-classifier", "classify-sklearn",
+            "--i-reads", str(rep_seqs_qza_to_use),
+            "--i-classifier", str(classifier_to_use),
+            "--o-classification", str(classified_qza),
+            "--p-n-jobs", str(threads)
+        ]
+        # Added capture_output=True (This was the missing one)
+        run_command("qiime", cmd_classify, check=True, capture_output=True)
 
     except subprocess.CalledProcessError as e:
-        print(f"     [ERROR] QIIME2 classify-sklearn failed: {e.stderr}", file=sys.stderr)
+        print(f"  [ERROR] QIIME2 classify-sklearn failed: {e.stderr}", file=sys.stderr)
         raise RuntimeError("Taxonomic classification failed.") from e
 
     if not classified_qza.exists():
         raise ValidationError(f"QIIME2 failed to create {classified_qza}")
 
     # step 2: exports .qza to .tsv
-    print(f"   -> Exporting taxonomy to {export_dir}...")
     cmd_export = [
         "qiime", "tools", "export",
         "--input-path", str(classified_qza),
@@ -204,7 +180,7 @@ Raises:
     ]
 
     try:
-        run_command("qiime", cmd_export, check=True)
+        run_command("qiime", cmd_export, check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         print(f"     [ERROR] QIIME2 tools export failed: {e.stderr}", file=sys.stderr)
         raise RuntimeError("Taxonomy export failed.") from e
@@ -228,5 +204,4 @@ Raises:
         print(f"     [ERROR] Failed to fix taxonomy header: {e}", file=sys.stderr)
         raise RuntimeError("Header fix failed.") from e
 
-    print(f"   -> Taxonomy file ready: {final_taxonomy_tsv}")
     return final_taxonomy_tsv

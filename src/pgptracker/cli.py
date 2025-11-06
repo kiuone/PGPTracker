@@ -4,6 +4,12 @@ PGPTracker CLI - Main entry point for command-line interface.
 This module provides the main CLI structure using argparse to process
 ASV sequences and generate PGPT (Plant Growth-Promoting Trait) predictions.
 
+It supports four modes:
+1. 'process': Runs the full pipeline end-to-end.
+2. Individual steps ('export', 'place_seqs', etc.): Runs only that step.
+3. 'setup': Sets up required Conda environments.
+4. 'interactive': Guided prompts for input.
+
 Author: Vivian Mello
 Advisor: Prof. Marco Antônio Bacellar
 Institution: UFPR Palotina - Bioprocess and Biotechnology Engineering
@@ -12,17 +18,14 @@ Institution: UFPR Palotina - Bioprocess and Biotechnology Engineering
 import argparse
 import sys
 import importlib.resources
-from pgptracker.utils.validator import validate_inputs, ValidationError
-from pgptracker.qiime.export_module import export_qza_files
 import subprocess
 from datetime import date
 from pathlib import Path
-from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP, detect_available_cores, detect_available_memory
-from pgptracker.picrust.place_seqs import build_phylogenetic_tree 
-from pgptracker.picrust.hsp_prediction import predict_gene_content 
-from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline 
-from pgptracker.qiime.classify import classify_taxonomy
-from pgptracker.utils.merge import merge_taxonomy_to_table
+from typing import Optional, List
+from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
+from pgptracker import pipeline
+from pgptracker import subcommands
+from pgptracker.interactive import run_interactive_mode
 # Will be implemented in next artifacts
 # from pgptracker.interactive import run_interactive_mode
 
@@ -57,7 +60,7 @@ def setup_command(args: argparse.Namespace) -> int:
 
         yml_path = env_files_path / yml_filename
         # Verify if the .yml file exists
-        if not yml_path.exists():
+        if not yml_path.is_file():
             print(f"\n[ERROR] Environment file not found: {yml_path}")
             print(f"       Cannot create or update environment '{env_name}'.")
             all_success = False
@@ -73,32 +76,33 @@ def setup_command(args: argparse.Namespace) -> int:
             continue
         elif env_exists and args.force:
             print(f"[INFO] Environment '{env_name}' exists. Forcing update...")
-            cmd = ["conda", "env", "update", "--name", env_name, "-f", str(yml_path), "--prune"]
+            with importlib.resources.as_file(yml_path) as yml_real_path:
+                cmd = ["conda", "env", "update", "--name", env_name, "-f", str(yml_path), "--prune"]
             action_text = "updated"
         else: # env_exists is False
             print(f"[INFO] Environment '{env_name}' not found. Attempting creation...")
-            cmd = ["conda", "env", "create", "--name", env_name, "-f", str(yml_path)]
+            with importlib.resources.as_file(yml_path) as yml_real_path:
+                cmd = ["conda", "env", "create", "--name", env_name, "-f", str(yml_path)]
             action_text = "created"
             
-        print(f"       Using file: {yml_path}")
         print("       This may take several minutes...")
 
         try:
-            result = subprocess.run(cmd, check=True)
+            subprocess.run(cmd, check=True)
             print(f"[SUCCESS] Environment '{env_name}' {action_text} successfully.")
         except subprocess.CalledProcessError as e:
-            print(f"\n[ERROR] Failed to {action_text} '{env_name}'. Conda exited with code {e.returncode}.")
+            print(f"\n[ERROR] Failed to {action_text} '{env_name}'. Conda exited with code {e.returncode}.", file=sys.stderr)
             all_success = False
         except FileNotFoundError:
-            print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?")
+            print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?", file=sys.stderr)
             all_success = False
-            break 
+            break
             
     if all_success:
         print("Setup completed successfully!")
         return 0
     else:
-        print("Setup failed for one or more environments.")
+        print("Setup failed for one or more environments.", file=sys.stderr)
         return 1
 
 
@@ -125,15 +129,17 @@ def create_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(
         dest="command",
         required=True,
-        help="Available commands"
+        help="Available commands:'process' (full pipeline), 'setup', or individual steps ('export', 'classify', etc.)"
     )
     
-    # Process command (Stage 1: ASVs -> PGPTs)
+    # Process command (full pipeline)
     process_parser = subparsers.add_parser(
         "process",
-        help="Process ASV sequences to generate PGPT predictions"
+        help="Run the full pipeline (ASVs -> PGPTs)",
+        description="Run the full PGPTracker pipeline from input sequences and table to final PGPT analysis."
     )
     _add_process_arguments(process_parser)
+    process_parser.set_defaults(func=process_command)
 
     setup_parser = subparsers.add_parser(
         "setup",
@@ -146,11 +152,18 @@ def create_parser() -> argparse.ArgumentParser:
         help="Force update of existing environments to match .yml files"
         )
     
+    subcommands.register_export_command(subparsers)
+    subcommands.register_place_seqs_command(subparsers)
+    subcommands.register_hsp_command(subparsers)
+    subcommands.register_metagenome_command(subparsers)
+    subcommands.register_classify_command(subparsers)
+    subcommands.register_merge_command(subparsers)
+    
     return parser
 
 def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     """
-    Adds arguments for the 'process' command.
+    Helper function to add all arguments for the 'process' command.
     
     Args:
         parser: ArgumentParser instance to add arguments to.
@@ -244,169 +257,23 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
 
 def process_command(args: argparse.Namespace) -> int:
     """
-    Executes the process command (Stage 1: ASVs -> PGPTs).
-    
-    Args:
-        args: Parsed command-line arguments.
-        
-    Returns:
-        int: Exit code (0 for success, non-zero for errors).
+    Handler for the 'process' command.
+    Delegates to interactive mode or the core pipeline.
     """
-    print("PGPTracker - Process Pipeline (Stage 1)")
-    print()
-    
-    #verify the interactive mode
     if args.interactive:
-        print("Starting interactive mode...")
-        # Will be implemented in interactive.py
-        # return run_interactive_mode()
-        print("ERROR: Interactive mode not yet implemented", file=sys.stderr)
+        # Call the guided prompt mode
+        return run_interactive_mode()
+    
+    # Check for required args in non-interactive mode
+    if not args.rep_seqs or not args.feature_table:
+        print("ERROR: --rep_seqs and --feature_table are required in non-interactive mode", file=sys.stderr)
+        print("       (or, use the '-i' flag for interactive mode)", file=sys.stderr)
         return 1
-    # Non-interactive mode requires both input files
-    elif not args.rep_seqs or not args.feature_table:
-        print("ERROR: --rep-seqs and --feature-table are required in non-interactive mode", file=sys.stderr)
-        print("       Use --interactive for guided prompts", file=sys.stderr)
-        return 1
-    
-    # Determine output directory
-    output_dir_str = args.output
-    if output_dir_str is None:
-        output_dir_str = f"results/run_{date.today():%d-%m-%Y}"
-
-    # Determine threads
-    # Use detect_available_cores() from env_manager if -t is not set
-    threads = args.threads or detect_available_cores()
-    RAM = detect_available_memory()
-    print(f"Using {threads} threads for processing.")
-    print(f"{RAM} of RAM available for processing.\n note: If the process get 'killed' if means you need more RAM.")
-    print(f"Setting Max NSTI to: {args.max_nsti}")
-
-    # Validate input files
-    print("\nStep 1/8: Validating input files...")
-    try:
-        inputs = validate_inputs(args.rep_seqs, args.feature_table, output_dir_str)
-        print(f"  -> Representative sequences: {inputs['sequences']}")
-        print(f"  -> Feature table: {inputs['table']}")
-        print(f"  -> Output directory: {inputs['output']}")
-        print(f"  -> Detected formats: {inputs['seq_format']}, {inputs['table_format']}")
-    
-    except ValidationError as e:
-        print(f"\n[VALIDATION ERROR]\n{e}", file=sys.stderr)
-        return 1
-    print()
-    
-    # Export .qza files if needed
-    print("\nStep 2/8: Exporting files to standard formats...")
-    try:
-        exported = export_qza_files(inputs, inputs['output'])
-    except (RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[EXPORT ERROR] Export failed: {e}", file=sys.stderr)
-        return 1
-    
-    # Define PICRUSt2 output directory
-    picrust_dir = inputs['output'] / "picrust2_intermediates"
-    
-    # Build phylogenetic tree (PICRUSt2)
-    print("\nStep 3/8: Building phylogenetic tree...")
-    print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
-    print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
-    try:
-        phylo_tree_path = build_phylogenetic_tree(
-            sequences_path=exported['sequences'],
-            output_dir=picrust_dir,
-            threads=threads
-        )
-    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[PHYLO ERROR] Phylogenetic tree build failed: {e}", file=sys.stderr)
-        return 1
-    
-    # Predict gene content (PICRUSt2)
-    print("\nStep 4/8: Predicting gene content...")
-    print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
-    print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
-    try:
-        # TODO: Add logic to pass chunk_size from args if needed
-        predicted_paths = predict_gene_content(
-            tree_path=phylo_tree_path,
-            output_dir=picrust_dir,
-            threads=threads,
-            chunk_size=args.chunk_size
-        )
-    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[PREDICT ERROR] Gene prediction failed: {e}", file=sys.stderr)
-        return 1
-    
-    # Normalize abundances (PICRUSt2)
-    print("\nStep 5/8: Normalizing abundances...")
-    print(f" -> Using table: {exported['table']}") # Using the .biom exported
-    print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
-    try:
-        pipeline_outputs = run_metagenome_pipeline(
-            table_path=exported['table'],
-            marker_path=predicted_paths['marker'],
-            ko_predicted_path=predicted_paths['ko'],
-            output_dir=picrust_dir,
-            max_nsti=args.max_nsti
-        )
-    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[PIPELINE ERROR] Metagenome pipeline failed: {e}", file=sys.stderr)
-        return 1
-    
-    # Classify taxonomy (QIIME2)
-    print("\nStep 6/8: Classifying taxonomy...")
-    classifier_path_obj = None
-    if args.classifier_qza:
-        # 1. User gave a custom classifier
-        print(f"\n-> Using custom classifier from: {args.classifier_qza}")
-        classifier_path_obj = Path(args.classifier_qza)
-        # Note: classify_taxonomy will handle the .exists() check
-    else:
-        # 2. User didn't provide a classifier, use default bundled
-        print("\n-> Using default bundled Greengenes (2024.09) classifier.")
-        try:
-            classifier_path_obj = importlib.resources.files("pgptracker") / "databases" / "2024.09.taxonomy.asv.tsv.qza"
-            # We pass this 'Traversable' object directly
-        except FileNotFoundError:
-            print("[ERROR] Default classifier (2024.09.taxonomy.asv.tsv.qza) not found!", file=sys.stderr)
-            print("    This file should be bundled with PGPTracker.", file=sys.stderr)
-            print("    Ensure 'databases/*.qza' is in setup.py's package_data.", file=sys.stderr)
-            return 1
-        print(f" -> Classifier object: {classifier_path_obj}")
         
-    try:
-        taxonomy_path = classify_taxonomy(
-         rep_seqs_path=inputs['sequences'],    
-         seq_format=inputs['seq_format'],      
-         classifier_qza_path=Path(args.classifier_qza) if args.classifier_qza else None, 
-         output_dir=inputs['output'], # Save in /output/taxonomy/
-         threads=threads
-        )
-    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[TAXONOMY ERROR] Classification failed: {e}", file=sys.stderr)
-        return 1
-
-    # Merge taxonomy into feature table (BIOM)
-    print("\nStep 7/8: Merging taxonomy into feature table...")
-    try:
-        merged_table_path = merge_taxonomy_to_table(
-            seqtab_norm_gz=pipeline_outputs['seqtab_norm'],
-            taxonomy_tsv=taxonomy_path,
-            output_dir=inputs['output'], # Save in /output/
-            save_intermediates=args.save_intermediates
-        )
-    except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
-        print(f"\n[MERGE ERROR] Table merging failed: {e}", file=sys.stderr)
-        return 1
-    
-    # Generate PGPT tables
-    print("\nStep 8/8: Generating PGPT tables...")
-    print("  -> Mapping KOs to PGPTs using PLaBA database")
-    # Will be implemented in analysis/pgpt.py
-    # For now, just print success message
-    print("Pipeline completed successfully!")
-    print(f"Results saved to: {inputs['output']}")
-    
-    return 0
+    # Call the core pipeline logic
+    print("PGPTracker - Full Process Pipeline (Stage 1)")
+    print()
+    return pipeline.run_pipeline(args)
 
 def main() -> int:
     """
@@ -416,17 +283,78 @@ def main() -> int:
         int: Exit code (0 for success, non-zero for errors).
     """
     parser = create_parser()
+    
+    # Handle case where no command is given, or just -i
+    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == '-i'):
+        # Force interactive mode if only '-i' is given
+        if len(sys.argv) == 2 and sys.argv[1] == '-i':
+            return run_interactive_mode()
+        parser.print_help(sys.stderr)
+        return 1
+    
+    # Special case: 'pgptracker -i' is ambiguous.
+    # We map 'pgptracker -i' to 'pgptracker process -i'
+    if sys.argv[1] == '-i':
+        # Re-route to process command
+        sys.argv[1] = 'process'
+        sys.argv.append('-i')
+        
     args = parser.parse_args()
     
-    if args.command == "process":
-        return process_command(args)
-    elif args.command == "setup":
-        return setup_command(args)
+    # Dispatch to the correct function based on the subcommand
+    if hasattr(args, 'func'):
+        try:
+            return args.func(args)
+        except Exception as e:
+            # Global catch-all for unexpected errors
+            print(f"\n[UNHANDLED ERROR] An unexpected error occurred: {e}", file=sys.stderr)
+            print("Please report this issue on GitHub.", file=sys.stderr)
+            import traceback
+            traceback.print_exc(file=sys.stderr)
+            return 1
     
-    # Should not reach here due to required=True
+    # Fallback if no command is somehow given (should be caught by required=True)
     parser.print_help()
     return 1
 
-
 if __name__ == "__main__":
     sys.exit(main())
+
+# def main() -> int:
+#     """
+#     Main entry point for the CLI application.
+    
+#     Returns:
+#         int: Exit code (0 for success, non-zero for errors).
+#     """
+#     parser = create_parser()
+
+#     if len(sys.argv) == 1:
+#         parser.print_help(sys.stderr)
+#         return 1
+    
+#     args = parser.parse_args()
+
+#     # Dispatch to the correct function based on the subcommand
+#     # The 'func' default is set during 'add_parser'
+#     if hasattr(args, 'func'):
+#         try:
+#             return args.func(args)
+#         except Exception as e:
+#             # Global catch-all for unexpected errors
+#             print(f"\n[UNHANDLED ERROR] An unexpected error occurred: {e}", file=sys.stderr)
+#             print("Please report this issue on GitHub.", file=sys.stderr)
+#             return 1
+        
+#     if args.command == "process":
+#         return process_command(args)
+#     elif args.command == "setup":
+#         return setup_command(args)
+
+#     # Fallback if no command is somehow given.
+#     # Should not reach here due to required=True
+#     parser.print_help()
+#     return 1
+
+# if __name__ == "__main__":
+#     sys.exit(main())

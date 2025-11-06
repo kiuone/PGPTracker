@@ -1,0 +1,262 @@
+"""
+Subcommand definitions for PGPTracker CLI.
+
+This module defines the functions (handlers) and argument parser setups
+(registration) for each individual pipeline step, allowing them to be
+run independently.
+"""
+import argparse
+import sys
+import importlib.resources
+import subprocess
+from pathlib import Path
+
+# Local imports
+from pgptracker.utils.validator import ValidationError
+from pgptracker.qiime.export_module import export_qza_files
+from pgptracker.picrust.place_seqs import build_phylogenetic_tree
+from pgptracker.picrust.hsp_prediction import predict_gene_content
+from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
+from pgptracker.qiime.classify import classify_taxonomy
+from pgptracker.utils.merge import merge_taxonomy_to_table
+from pgptracker.utils.validator import validate_output_file as _validate_output
+# Import helpers from env_manager
+from pgptracker.utils.env_manager import get_output_dir, get_threads
+
+# Handler Functions (logic for each subcommand)
+def export_command(args: argparse.Namespace) -> int:
+    """Handler for the 'export' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        if not args.rep_seqs or not args.feature_table:
+            print("ERROR: --rep-seqs and --feature-table are required.", file=sys.stderr)
+            return 1
+        
+        seq_path = Path(args.rep_seqs)
+        table_path = Path(args.feature_table)
+        
+        # We need to guess the format for the export_qza_files function
+        seq_format = 'qza' if seq_path.suffix == '.qza' else 'fasta'
+        table_format = 'qza' if table_path.suffix == '.qza' else 'biom'
+
+        inputs = {
+            'sequences': seq_path,
+            'table': table_path,
+            'seq_format': seq_format,
+            'table_format': table_format,
+            'output': output_dir  # Pass Path object
+        }
+        
+        exported_paths = export_qza_files(inputs, output_dir)
+        print("\nExport successful:")
+        print(f"  -> Sequences: {exported_paths['sequences']}")
+        print(f"  -> Table: {exported_paths['table']}")
+        return 0
+
+    except (ValidationError, RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Export failed: {e}", file=sys.stderr)
+        return 1
+
+def place_seqs_command(args: argparse.Namespace) -> int:
+    """Handler for the 'place_seqs' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        threads = get_threads(args.threads)
+        seq_path = Path(args.sequences_fna)
+        
+        _validate_output(seq_path, "place_seqs", "representative sequences")
+
+        tree_path = build_phylogenetic_tree(
+            sequences_path=seq_path,
+            output_dir=output_dir,
+            threads=threads
+        )
+        print(f"\nPhylogenetic tree build successful:")
+        print(f"  -> Output tree: {tree_path}")
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Tree build failed: {e}", file=sys.stderr)
+        return 1
+
+def hsp_command(args: argparse.Namespace) -> int:
+    """Handler for the 'hsp' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        threads = get_threads(args.threads)
+        tree_path = Path(args.tree)
+
+        _validate_output(tree_path, "hsp", "phylogenetic tree")
+        
+        print(f"  -> Threads: {threads}")
+        print(f"  -> Chunk size: {args.chunk_size}")
+        
+        predicted_paths = predict_gene_content(
+            tree_path=tree_path,
+            output_dir=output_dir,
+            threads=threads,
+            chunk_size=args.chunk_size
+        )
+        print(f"\nGene prediction successful:")
+        print(f"  -> Marker file: {predicted_paths['marker']}")
+        print(f"  -> KO file: {predicted_paths['ko']}")
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Gene prediction failed: {e}", file=sys.stderr)
+        return 1
+
+def metagenome_command(args: argparse.Namespace) -> int:
+    """Handler for the 'metagenome' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        table_path = Path(args.table_biom)
+        marker_path = Path(args.marker_gz)
+        ko_path = Path(args.ko_gz)
+
+        _validate_output(table_path, "metagenome", "feature table")
+        _validate_output(marker_path, "metagenome", "marker predictions")
+        _validate_output(ko_path, "metagenome", "KO predictions")
+        
+        pipeline_outputs = run_metagenome_pipeline(
+            table_path=table_path,
+            marker_path=marker_path,
+            ko_predicted_path=ko_path,
+            output_dir=output_dir,
+            max_nsti=args.max_nsti
+        )
+        print(f"\nNormalization successful:")
+        print(f"  -> Normalized table: {pipeline_outputs['seqtab_norm']}")
+        print(f"  -> Unstratified KOs: {pipeline_outputs['pred_metagenome_unstrat']}")
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Normalization failed: {e}", file=sys.stderr)
+        return 1
+
+def classify_command(args: argparse.Namespace) -> int:
+    """Handler for the 'classify' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        threads = get_threads(args.threads)
+        seq_path = Path(args.rep_seqs)
+
+        _validate_output(seq_path, "classify", "representative sequences")
+
+        seq_format = 'qza' if seq_path.suffix == '.qza' else 'fasta'
+        seq_format = 'qza' if seq_path.suffix == '.qza' else 'fasta'
+            
+        tax_path = classify_taxonomy(
+            rep_seqs_path=seq_path,
+            seq_format=seq_format,
+            classifier_qza_path=Path(args.classifier_qza) if args.classifier_qza else None,
+            output_dir=output_dir,
+            threads=threads
+        )
+        
+        print(f"\nTaxonomy classification successful:")
+        print(f"  -> Output taxonomy file: {tax_path}")
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Classification failed: {e}", file=sys.stderr)
+        return 1
+
+def merge_command(args: argparse.Namespace) -> int:
+    """Handler for the 'merge' subcommand."""
+    try:
+        output_dir = get_output_dir(args.output)
+        seqtab_gz_path = Path(args.seqtab_norm_gz)
+        tax_tsv_path = Path(args.taxonomy_tsv)
+
+        _validate_output(seqtab_gz_path, "merge", "normalized sequence table")
+        _validate_output(tax_tsv_path, "merge", "taxonomy table")
+
+        merged_path = merge_taxonomy_to_table(
+            seqtab_norm_gz=seqtab_gz_path,
+            taxonomy_tsv=tax_tsv_path,
+            output_dir=output_dir,
+            save_intermediates=args.save_intermediates
+        )
+        print(f"\nTable merge successful:")
+        print(f"  -> Final merged table: {merged_path}")
+        return 0
+    except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
+        print(f"\n[ERROR] Table merge failed: {e}", file=sys.stderr)
+        return 1
+
+# Registration Functions (Argument Parsers)
+def register_export_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'export' subcommand."""
+    export_parser = subparsers.add_parser(
+        "export",
+        help="Step 2: Export QIIME2 .qza files to .fna/.biom",
+        description="Step 2: Export QIIME2 .qza files to standard .fna and .biom formats."
+    )
+    export_parser.add_argument("--rep-seqs", type=str, required=True, metavar="PATH", help="Path to representative sequences (.qza or .fna)")
+    export_parser.add_argument("--feature-table", type=str, required=True, metavar="PATH", help="Path to feature table (.qza or .biom)")
+    export_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    export_parser.set_defaults(func=export_command)
+
+def register_place_seqs_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'place_seqs' subcommand."""
+    place_seqs_parser = subparsers.add_parser(
+        "place_seqs",
+        help="Step 3: Build phylogenetic tree (PICRUSt2 place_seqs.py)",
+        description="Step 3: Build phylogenetic tree by placing sequences into reference tree using PICRUSt2 place_seqs.py."
+    )
+    place_seqs_parser.add_argument("--sequences-fna", type=str, required=True, metavar="PATH", help="Path to representative sequences (.fna file)")
+    place_seqs_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    place_seqs_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
+    place_seqs_parser.set_defaults(func=place_seqs_command)
+
+def register_hsp_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'hsp' subcommand."""
+    predict_parser = subparsers.add_parser(
+        "hsp",
+        help="Step 4: Predict gene content (PICRUSt2 hsp.py)",
+        description="Step 4: Predict gene content (16S copy number and KOs) using PICRUSt2 hsp.py."
+    )
+    predict_parser.add_argument("--tree", type=str, required=True, metavar="PATH", help="Path to phylogenetic tree (e.g., placed_seqs.tre)")
+    predict_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    predict_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
+    predict_parser.add_argument("--chunk-size", type=int, default=1000, metavar="INT", help="Gene families per chunk for hsp.py (default: 1000)")
+    predict_parser.set_defaults(func=hsp_command)
+
+def register_metagenome_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'metagenome' subcommand."""
+    metagenome_parser = subparsers.add_parser(
+        "metagenome",
+        help="Step 5: Normalize abundances (PICRUSt2 metagenome_pipeline.py)",
+        description="Step 5: Normalize abundances by 16S copy number and create KO abundance table using PICRUSt2 metagenome_pipeline.py."
+    )
+    metagenome_parser.add_argument("--table-biom", type=str, required=True, metavar="PATH", help="Path to exported feature table (.biom file)")
+    metagenome_parser.add_argument("--marker-gz", type=str, required=True, metavar="PATH", help="Path to marker predictions (marker_nsti_predicted.tsv.gz)")
+    metagenome_parser.add_argument("--ko-gz", type=str, required=True, metavar="PATH", help="Path to KO predictions (KO_predicted.tsv.gz)")
+    metagenome_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    metagenome_parser.add_argument("--max-nsti", type=float, default=1.7, metavar="FLOAT", help="Maximum NSTI threshold (default: 1.7)")
+    metagenome_parser.set_defaults(func=metagenome_command)
+
+def register_classify_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'classify' subcommand."""
+    classify_parser = subparsers.add_parser(
+        "classify",
+        help="Step 6: Classify taxonomy (QIIME2 classify-sklearn)",
+        description="Step 6: Classify taxonomy using QIIME2 feature-classifier classify-sklearn."
+    )
+    classify_parser.add_argument("--rep-seqs", type=str, required=True, metavar="PATH", help="Path to representative sequences (.qza or .fna)")
+    classify_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    classify_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
+    classify_parser.add_argument("--classifier-qza", type=str, metavar="PATH", help="Path to a custom QIIME2 classifier .qza file (default: Greengenes 2024.09)")
+    classify_parser.set_defaults(func=classify_command)
+
+def register_merge_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'merge' subcommand."""
+    merge_parser = subparsers.add_parser(
+        "merge",
+        help="Step 7: Merge taxonomy into normalized feature table",
+        description="Step 7: Merge the QIIME2 taxonomy file into the PICRUSt2 normalized BIOM table."
+    )
+    merge_parser.add_argument("--seqtab-norm-gz", type=str, required=True, metavar="PATH", help="Path to normalized table (seqtab_norm.tsv.gz)")
+    merge_parser.add_argument("--taxonomy-tsv", type=str, required=True, metavar="PATH", help="Path to classified taxonomy (taxonomy.tsv)")
+    merge_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    merge_parser.add_argument("--save-intermediates", action="store_true", help="Save intermediate .biom files")
+    merge_parser.set_defaults(func=merge_command)
