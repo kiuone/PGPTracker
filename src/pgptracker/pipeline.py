@@ -116,7 +116,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     # Classify taxonomy (QIIME2)
     print("\nStep 6/8: Classifying taxonomy...")
     try:
-        taxonomy_path = classify_taxonomy(
+        taxonomy_path=classify_taxonomy(
          rep_seqs_path=inputs['sequences'],    
          seq_format=inputs['seq_format'],     
          classifier_qza_path=Path(args.classifier_qza) if args.classifier_qza else None, 
@@ -126,7 +126,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[TAXONOMY ERROR] Classification failed: {e}", file=sys.stderr)
         return 1
-    print("  -> Taxonomic classification successful.")
+    print("     -> Taxonomic classification successful.")
 
     # Merge taxonomy into feature table (BIOM)
     print("\nStep 7/8: Merging taxonomy into feature table...")

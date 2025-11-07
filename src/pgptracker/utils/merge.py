@@ -8,6 +8,7 @@ import subprocess
 import gzip
 import shutil
 import polars as pl
+import sys
 from pathlib import Path
 from pgptracker.utils.env_manager import run_command
 from pgptracker.utils.validator import ValidationError
@@ -17,15 +18,16 @@ def _process_taxonomy_polars(df_lazy: pl.LazyFrame) -> pl.LazyFrame:
     """
     Lazily splits taxonomy column into levels and reorders columns using Polars.
     
-    Tasks:
-    1. Split 'taxonomy' into Kingdom, Phylum, etc.
-    2. Clean prefixes (e.g., 'k__')
-    3. Reorder columns to: OTU/ASV_ID | Tax | Samples...
+Tasks:
+    1. Identify ASV_ID (first col) and taxonomy (last col).
+    2. Split 'taxonomy' into Kingdom, Phylum, etc.
+    3. Clean prefixes (e.g., 'k__')
+    4. Reorder columns to: OTU/ASV_ID | Tax | Samples...
     """
     # Define standard taxonomic levels
     tax_levels = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
     
-    # 1. Split taxonomy string 'k__Bacteria; p__Firmicutes; ...'
+    # 1. Split taxonomy string 'k_Bacteria; p_Firmicutes; ...'
     df_lazy = df_lazy.with_columns(
         pl.col('taxonomy').str.split('; ').alias('tax_split')
     )
@@ -36,7 +38,7 @@ def _process_taxonomy_polars(df_lazy: pl.LazyFrame) -> pl.LazyFrame:
             pl.col('tax_split')
             .list.slice(i, 1)
             .list.first()
-            .str.replace(r"^[kpcofgs]__", "") # Clean prefix
+            .str.replace(r"^[dkpcofgs]__", "") # Clean prefix
             .alias(level_name)
         )
     
@@ -72,112 +74,76 @@ def merge_taxonomy_to_table(
     output_dir: Path,
     save_intermediates: bool = False
 ) -> Path:
-    
     """
-    Runs the BIOM conversion, merging, and Polars processing pipeline.
-
-    1. Unzips 'seqtab_norm.tsv.gz'
-    2. Converts 'seqtab_norm.tsv' -> 'seqtab_norm.biom'
-    3. Merges 'taxonomy.tsv' -> 'feature_table_with_taxonomy.biom'
-    4. Converts '...with_taxonomy.biom' -> 'temp_merged_table.tsv'
-    5. Processes 'temp_merged_table.tsv' -> 'norm_wt_feature_table.tsv' (using Polars)
+    Runs the table merging and processing using a Polars-native lazy pipeline.
+    This replaces the gunzip -> biom convert -> biom merge -> biom convert pipeline.
     """
     
-    # Define caminhos
+    final_processed_tsv = output_dir / "norm_wt_feature_table.tsv"
+    
+    # The intermediate .biom files are no longer created,
+    # so we can clean up the old work directory if it exists.
     work_dir = output_dir / "merge_work"
-    work_dir.mkdir(parents=True, exist_ok=True)
-    
-    seqtab_tsv = work_dir / "seqtab_norm.tsv"
-    seqtab_biom = work_dir / "seqtab_norm.biom"
-    merged_biom = work_dir / "feature_table_with_taxonomy.biom"
-    raw_merged_tsv = work_dir / "temp_merged_table.tsv"
-    final_processed_tsv = output_dir / "norm_wt_feature_table.tsv" # Final name
+    if not save_intermediates and work_dir.exists():
+        print("  -> Cleaning up old intermediate merge_work directory...")
+        try:
+            shutil.rmtree(work_dir)
+        except OSError as e:
+            print(f"  [Warning] Could not remove old work dir: {e}")
 
     try:
-        # Step 1: Unzip 'seqtab_norm.tsv.gz' (o 'gunzip -c')
-        if not raw_merged_tsv.exists():
-            with gzip.open(seqtab_norm_gz, 'rb') as f_in:
-                with open(seqtab_tsv, 'wb') as f_out:
-                    shutil.copyfileobj(f_in, f_out)
-            _validate_output(seqtab_tsv, "gunzip", "unzipped sequence table")
-
-            # Step 2: Converts TSV -> BIOM (o 'biom convert') 
-            cmd_convert1 = [
-                "biom", "convert",
-                "-i", str(seqtab_tsv),
-                "-o", str(seqtab_biom),
-                "--table-type=OTU table",
-                "--to-hdf5"
-            ]
-            # 'biom' is in 'pgptracker' environment
-            run_command("PGPTracker", cmd_convert1, check=True, capture_output=True)
-            _validate_output(seqtab_biom, "biom convert", "normalized BIOM table")
-
-            # Step 3: Adds metadata (o 'biom add-metadata') 
-            cmd_merge = [
-                "biom", "add-metadata",
-                "-i", str(seqtab_biom),
-                "-o", str(merged_biom),
-                "--observation-metadata-fp", str(taxonomy_tsv),
-                "--sc-separated", "taxonomy"
-            ]
-            run_command("PGPTracker", cmd_merge, check=True, capture_output=True)
-            _validate_output(merged_biom, "biom add-metadata", "merged BIOM table")
-
-            # Step 4: Converts BIOM -> TSV (o 'biom convert' final)
-            cmd_convert2 = [
-                "biom", "convert",
-                "-i", str(merged_biom),
-                "-o", str(raw_merged_tsv),
-                "--to-tsv"
-            ]
-            run_command("PGPTracker", cmd_convert2, check=True)
-            _validate_output(raw_merged_tsv, "biom convert", "raw merged TSV")
+        # Step 1: Scan the normalized feature table (from PICRUSt2)
+        # PICRUSt2 output starts with '#', but the first real line is the header
+        df_norm = pl.scan_csv(
+            seqtab_norm_gz,
+            separator='\t',
+            comment_prefix="#"
+        ).rename({"normalized": "OTU/ASV_ID"}) # Rename the ID column
         
-        # Step 5: Process with Polars
-        # Scan the file (lazy)
-        df_lazy = pl.scan_csv(raw_merged_tsv, separator='\t', skip_rows=1)
+        # Step 2: Scan the taxonomy table (from QIIME2)
+        # This file also starts with '#' (after our fix in classify.py)
+        df_tax = pl.scan_csv(
+            taxonomy_tsv,
+            separator='\t',
+            comment_prefix=None
+        ).rename({"#OTU/ASV_ID": "OTU/ASV_ID"}) # Rename the ID column
         
-        # Call the lazy processing helper function
-        processed_lazy = _process_taxonomy_polars(df_lazy)
+        # Step 3: Join the two lazyframes
+        print(" \n -> Merging taxonomy and normalized table using Polars...")
+        df_joined = df_norm.join(df_tax, on="OTU/ASV_ID", how="left")
         
-        # Step 6: Print Snippets
+        # Step 4: Process taxonomy strings into columns
+        processed_lazy = _process_taxonomy_polars(df_joined)
+
+        # Step 5: Collect (stream) and write final TSV
+        processed_lazy.sort(['Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'], 
+                            nulls_last=True).collect(engine="streaming").write_csv(
+            final_processed_tsv, separator='\t'
+        )
+        
+        _validate_output(final_processed_tsv, "Polars Merge", "final processed table")
+
+        # Step 6: Print Snippets (same as before)
         try:
-            # Get 3x3 head
-            print("\n--- Data Head (First 3 ASVs, First 3 Columns) ---")
-            snippet_head = processed_lazy.head(3).select(pl.all().head(3)).collect()
-            with pl.Config(tbl_rows=3, tbl_cols=3, tbl_width_chars=80):
-                print(snippet_head)
-
-            # Get 5x3 tail
-            print("\n--- Data Tail (Last 5 ASVs, Last 3 Columns) ---")
-            snippet_tail = processed_lazy.tail(5).select(pl.all().tail(3)).collect()
-            with pl.Config(tbl_rows=5, tbl_cols=3, tbl_width_chars=80):
-                print(snippet_tail)
-            print("\n")
-
+            cols = processed_lazy.sort(['Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'], 
+                                       nulls_last=True).collect_schema().names()[:9]
+            snippet_df = pl.read_csv(
+                final_processed_tsv,
+                separator='\t',
+                columns=cols, # Read only first 9 columns
+                n_rows=3, # Read only 3 rows
+            )
+            print("\n--- Data head, first 9 columns e first 3 rows---")
+            with pl.Config(set_fmt_str_lengths=20, tbl_width_chars=160,tbl_rows=3,
+                           tbl_cols=9,tbl_hide_dataframe_shape=True,
+                           tbl_hide_column_data_types=True):
+                print(snippet_df)
         except Exception as e:
             print(f"  [Warning] Could not print data snippets: {e}")
 
-        # Step 7: Write final processed table to disk
-        # 1. collect(engine="streaming") processes the file in chunks (solves RAM issue)
-        # 2. write_csv() saves the result
-        processed_lazy.collect(engine="streaming").write_csv(final_processed_tsv, separator='\t')
-        
-        _validate_output(final_processed_tsv, "Polars Processing", "final processed table")
-
-    except (subprocess.CalledProcessError, ValidationError, gzip.BadGzipFile, FileNotFoundError, OSError) as e:
-        print(f"  [ERROR] BIOM merging pipeline failed: {e}")
-        raise RuntimeError("BIOM merging pipeline failed.") from e
     except Exception as e:
         # Catch Polars errors
-        print(f"  [ERROR] Post-processing (Polars) failed: {e}")
-        raise RuntimeError("Taxonomy processing failed.") from e
-    
-    # Cleanup
-    if not save_intermediates:
-        print("  -> Cleaning up intermediate merge files...")
-        shutil.rmtree(work_dir)
+        print(f"  [ERROR] Polars merging pipeline failed: {e}", file=sys.stderr)
+        raise RuntimeError("Polars merging pipeline failed.") from e
 
-    print(f"  -> Final merged table ready: {final_processed_tsv}")
     return final_processed_tsv

@@ -10,6 +10,7 @@ from pathlib import Path
 import requests
 import appdirs
 import sys
+import shutil
 from importlib import resources
 from typing import Optional
 from tqdm import tqdm
@@ -191,14 +192,15 @@ Raises:
 
     # step 3: fix the header of the exported taxonomy file
     try:
-        with open(exported_tsv, 'r') as f_in:
-                lines = f_in.readlines()
+        with open(exported_tsv, 'r') as f_in, open(final_taxonomy_tsv, 'w') as f_out:
+            # Read and discard the original header (e.g., "Feature-ID\ttaxonomy...")
+            f_in.readline()
 
-        # Substitues the first line in the header
-        lines[0] = "OTU/ASV_ID\ttaxonomy\tconfidence\n"
+            # Write the new, BIOM-compatible header
+            f_out.write("#OTU/ASV_ID\ttaxonomy\tconfidence\n")
 
-        with open(final_taxonomy_tsv, 'w') as f_out:
-                f_out.writelines(lines)
+            # Copy the rest of the file data efficiently
+            shutil.copyfileobj(f_in, f_out)
 
     except (OSError, IOError) as e:
         print(f"     [ERROR] Failed to fix taxonomy header: {e}", file=sys.stderr)
