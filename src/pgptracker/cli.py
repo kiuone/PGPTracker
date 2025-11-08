@@ -130,7 +130,7 @@ def create_parser() -> argparse.ArgumentParser:
         help="Available commands:'process' (full pipeline), 'setup', or individual steps ('export', 'classify', etc.)"
     )
     
-    # Process command (full pipeline)
+    # Process command (the main pipeline)
     process_parser = subparsers.add_parser(
         "process",
         help="Run the full pipeline (ASVs -> PGPTs)",
@@ -150,12 +150,16 @@ def create_parser() -> argparse.ArgumentParser:
         help="Force update of existing environments to match .yml files"
         )
     
+    setup_parser.set_defaults(func=setup_command)
+    
     subcommands.register_export_command(subparsers)
     subcommands.register_place_seqs_command(subparsers)
     subcommands.register_hsp_command(subparsers)
     subcommands.register_metagenome_command(subparsers)
     subcommands.register_classify_command(subparsers)
     subcommands.register_merge_command(subparsers)
+    subcommands.register_stratify_pgpt_command(subparsers)
+    subcommands.register_unstratify_pgpt_command(subparsers)
     
     return parser
 
@@ -217,6 +221,31 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Generate stratified output (Genus -> ASV -> KO -> PGPT)"
     )
+
+    params_group.add_argument(
+        "--tax-level",
+        type=str,
+        default="Genus",
+        choices=['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'],
+        metavar="LEVEL",
+        help="Taxonomic level for stratified analysis (default: Genus)"
+    )
+    # params_group.add_argument(
+    #     "--batch-size",
+    #     type=int,
+    #     default=500,
+    #     metavar="INT",
+    #     help="Number of taxa per batch for stratified analysis (default: 500)"
+    # )
+
+    params_group.add_argument(
+        "--pgpt-level",
+        type=str,
+        default="Lv3",
+        choices=['Lv1', 'Lv2', 'Lv3', 'Lv4', 'Lv5'],
+        metavar="LEVEL",
+        help="PGPT hierarchical level to use for analysis (default: Lv3)"
+    )
     
     params_group.add_argument(
         "--save-intermediates",
@@ -232,7 +261,7 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         type=str,
         default= None,
         metavar="PATH",
-        help="Output directory (default: results/run_YYYY-MM-DD)"
+        help="Output directory (default: results/run_DD-MM-YYYY)"
     )
     
     # Computational resources group

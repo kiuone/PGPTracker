@@ -23,6 +23,9 @@ from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
 from pgptracker.qiime.classify import classify_taxonomy
 from pgptracker.utils.merge import merge_taxonomy_to_table
 from pgptracker.utils.validator import ValidationError
+from pgptracker.analysis.unstratified import (load_pathways_db, 
+                                              generate_unstratified_pgpt)
+from pgptracker.analysis.stratify import generate_stratified_analysis
 
 def run_pipeline(args: argparse.Namespace) -> int:
     """
@@ -43,7 +46,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     print(f"{RAM} of RAM available for processing.\n note: If the process get 'killed' it means you need more RAM.")
 
     # Validate input files
-    print("\nStep 1/8: Validating input files...")
+    print("\nStep 1/9: Validating input files...")
     try:
         inputs = validate_inputs(args.rep_seqs, args.feature_table, str(output_dir_str))
         print(f"  -> Representative sequences: {inputs['sequences']}")
@@ -57,7 +60,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     print()
     
     # Export .qza files if needed
-    print("\nStep 2/8: Exporting files to standard formats...")
+    print("\nStep 2/9: Exporting files to standard formats...")
     try:
         exported = export_qza_files(inputs, inputs['output'])
     except (RuntimeError, subprocess.CalledProcessError) as e:
@@ -68,7 +71,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
     picrust_dir = inputs['output'] / "picrust2_intermediates"
     
     # Build phylogenetic tree (PICRUSt2)
-    print("\nStep 3/8: Building phylogenetic tree...")
+    print("\nStep 3/9: Building phylogenetic tree...")
     print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
     print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
     try:
@@ -82,7 +85,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         return 1
     
     # Predict gene content (PICRUSt2)
-    print("\nStep 4/8: Predicting gene content...")
+    print("\nStep 4/9: Predicting gene content...")
     print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
     print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
     try:
@@ -98,7 +101,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         return 1
     
     # Normalize abundances (PICRUSt2)
-    print("\nStep 5/8: Normalizing abundances...")
+    print("\nStep 5/9: Normalizing abundances...")
     print(f" -> Using table: {exported['table']}") # Using the .biom exported
     print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
     try:
@@ -114,7 +117,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
         return 1
     
     # Classify taxonomy (QIIME2)
-    print("\nStep 6/8: Classifying taxonomy...")
+    print("\nStep 6/9: Classifying taxonomy...")
     try:
         taxonomy_path=classify_taxonomy(
          rep_seqs_path=inputs['sequences'],    
@@ -129,9 +132,9 @@ def run_pipeline(args: argparse.Namespace) -> int:
     print("     -> Taxonomic classification successful.")
 
     # Merge taxonomy into feature table (BIOM)
-    print("\nStep 7/8: Merging taxonomy into feature table...")
+    print("\nStep 7/9: Merging taxonomy into feature table...")
     try:
-        merge_taxonomy_to_table(
+        merged_table_path = merge_taxonomy_to_table(
             seqtab_norm_gz=pipeline_outputs['seqtab_norm'],
             taxonomy_tsv=taxonomy_path,
             output_dir=inputs['output'], # Save in /output/
@@ -141,12 +144,46 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"\n[MERGE ERROR] Table merging failed: {e}", file=sys.stderr)
         return 1
     
-    # Generate PGPT tables
-    print("\nStep 8/8: Generating PGPT tables...")
-    print("  -> Mapping KOs to PGPTs using PLaBA database")
-    # Will be implemented in analysis/pgpt.py
-    # For now, just print success message
-    print("Pipeline completed successfully!")
-    print(f"Results saved to: {inputs['output']}")
+    # Generate Unstratified PGPT tables (PGPT x Sample)
+    print("\nStep 8/9: Generating Unstratified PGPT tables (PGPT x Sample)...")
+    try:
+        unstratified_output = generate_unstratified_pgpt(
+            unstrat_ko_path=pipeline_outputs['pred_metagenome_unstrat'],
+            output_dir=inputs['output'], pgpt_level=args.pgpt_level)
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        print(f"\n[UNSTRATIFIED ERROR] Failed: {e}", file=sys.stderr)
+        return 1
+        
+    stratified_output_name = None
+    if args.stratified:
+        print(f"\nStep 9/9: Generating Stratified PGPT tables ({args.tax_level} x PGPT x Sample)...")
+        try:
+            # All inputs are available from previous steps
+            stratified_output = generate_stratified_analysis(
+                merged_table_path=merged_table_path,
+                ko_predicted_path=predicted_paths['ko'],
+                output_dir=inputs['output'],
+                taxonomic_level=args.tax_level,
+                pgpt_level=args.pgpt_level,
+                # batch_size=args.batch_size
+            )
+            stratified_output_name = stratified_output.name
+        
+        except (FileNotFoundError, ValueError, RuntimeError) as e:
+            print(f"\n[STRATIFIED ERROR] Failed: {e}", file=sys.stderr)
+            print("  -> Continuing pipeline (unstratified analysis completed).")
+  
+    print("\nProcess pipeline completed successfully!")
+    print(f"Results saved to:")
+    print(f"  -> Unstratified PGPTs in: {unstratified_output.name}")
+    print(f"  -> Merged Table in: {merged_table_path.name}")
+    print(f"  -> KO Predictions in: {predicted_paths['ko'].name}")
+    
+    if stratified_output_name:
+        print(f"  -> Stratified PGPTs: {stratified_output_name}")
+    elif args.stratified:
+        print("  -> Stratified PGPTs: FAILED (see error above)")
+    else:
+        print("\nNote: you can run 'pgptracker stratify' to generate stratified analysis.")
 
-    return 0   
+    return 0

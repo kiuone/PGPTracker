@@ -20,8 +20,9 @@ from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
 from pgptracker.qiime.classify import classify_taxonomy
 from pgptracker.utils.merge import merge_taxonomy_to_table
 from pgptracker.utils.validator import validate_output_file as _validate_output
-# Import helpers from env_manager
 from pgptracker.utils.env_manager import get_output_dir, get_threads
+from pgptracker.analysis.unstratified import generate_unstratified_pgpt
+from pgptracker.analysis.stratify import generate_stratified_analysis
 
 # Handler Functions (logic for each subcommand)
 def export_command(args: argparse.Namespace) -> int:
@@ -153,8 +154,7 @@ def classify_command(args: argparse.Namespace) -> int:
             threads=threads
         )
         
-        print(f"\nTaxonomy classification successful:")
-        print(f"  -> Output taxonomy file: {tax_path}")
+        print(f"\nTaxonomy classification successful: {tax_path}")
         return 0
     except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"\n[ERROR] Classification failed: {e}", file=sys.stderr)
@@ -182,6 +182,64 @@ def merge_command(args: argparse.Namespace) -> int:
     except (RuntimeError, subprocess.CalledProcessError, FileNotFoundError) as e:
         print(f"\n[ERROR] Table merge failed: {e}", file=sys.stderr)
         return 1
+    
+def unstratify_pgpt_command(args: argparse.Namespace) -> int:
+    """Handler for the 'pgpt_unstratify' subcommand."""
+    print("Running PGPTracker Unstratified Analysis...")
+    try:
+        # 1. Validate input
+        ko_path = Path(args.ko_predictions)
+        _validate_output(ko_path, "pgpt_unstratify", "unstratified KO predictions")
+
+        # 2. Get output directory
+        output_dir = get_output_dir(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        print(f"  -> Output directory: {output_dir}")
+
+        # 3. Run the analysis
+        # This function loads the bundled database internally
+        generate_unstratified_pgpt(
+            unstrat_ko_path=ko_path,
+            output_dir=output_dir, 
+            pgpt_level=args.pgpt_level)
+        
+        print("\nUnstratified PGPT analysis command completed successfully.")
+        return 0
+
+    except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[UNSTRATIFY ERROR] Analysis failed: {e}", file=sys.stderr)
+        return 1
+    
+def stratify_pgpt_command(args: argparse.Namespace) -> int:
+    """Handler for the 'stratify' subcommand."""
+    print("Running PGPTracker Stratified Analysis...")
+    try:
+        # 1. Validate input files
+        merged_table = Path(args.merged_table)
+        ko_predictions = Path(args.ko_predictions)
+        
+        _validate_output(merged_table, "stratify", "merged taxonomy table")
+        _validate_output(ko_predictions, "stratify", "KO predictions table")
+
+        # 2. Get output directory
+        output_dir = get_output_dir(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 4. Run the stratified analysis
+        generate_stratified_analysis(
+            merged_table_path=merged_table,
+            ko_predicted_path=ko_predictions,
+            output_dir=output_dir,
+            taxonomic_level=args.tax_level,
+            pgpt_level=args.pgpt_level,
+            # batch_size=args.batch_size
+        )
+        
+        return 0
+        
+    except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
+        print(f"\n[STRATIFY ERROR] Analysis failed: {e}", file=sys.stderr)
+        return 1
 
 # Registration Functions (Argument Parsers)
 def register_export_command(subparsers: argparse._SubParsersAction):
@@ -193,7 +251,7 @@ def register_export_command(subparsers: argparse._SubParsersAction):
     )
     export_parser.add_argument("--rep-seqs", type=str, required=True, metavar="PATH", help="Path to representative sequences (.qza or .fna)")
     export_parser.add_argument("--feature-table", type=str, required=True, metavar="PATH", help="Path to feature table (.qza or .biom)")
-    export_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    export_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     export_parser.set_defaults(func=export_command)
 
 def register_place_seqs_command(subparsers: argparse._SubParsersAction):
@@ -204,7 +262,7 @@ def register_place_seqs_command(subparsers: argparse._SubParsersAction):
         description="Step 3: Build phylogenetic tree by placing sequences into reference tree using PICRUSt2 place_seqs.py."
     )
     place_seqs_parser.add_argument("--sequences-fna", type=str, required=True, metavar="PATH", help="Path to representative sequences (.fna file)")
-    place_seqs_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    place_seqs_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     place_seqs_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
     place_seqs_parser.set_defaults(func=place_seqs_command)
 
@@ -216,7 +274,7 @@ def register_hsp_command(subparsers: argparse._SubParsersAction):
         description="Step 4: Predict gene content (16S copy number and KOs) using PICRUSt2 hsp.py."
     )
     predict_parser.add_argument("--tree", type=str, required=True, metavar="PATH", help="Path to phylogenetic tree (e.g., placed_seqs.tre)")
-    predict_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    predict_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     predict_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
     predict_parser.add_argument("--chunk-size", type=int, default=1000, metavar="INT", help="Gene families per chunk for hsp.py (default: 1000)")
     predict_parser.set_defaults(func=hsp_command)
@@ -231,7 +289,7 @@ def register_metagenome_command(subparsers: argparse._SubParsersAction):
     metagenome_parser.add_argument("--table-biom", type=str, required=True, metavar="PATH", help="Path to exported feature table (.biom file)")
     metagenome_parser.add_argument("--marker-gz", type=str, required=True, metavar="PATH", help="Path to marker predictions (marker_nsti_predicted.tsv.gz)")
     metagenome_parser.add_argument("--ko-gz", type=str, required=True, metavar="PATH", help="Path to KO predictions (KO_predicted.tsv.gz)")
-    metagenome_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    metagenome_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     metagenome_parser.add_argument("--max-nsti", type=float, default=1.7, metavar="FLOAT", help="Maximum NSTI threshold (default: 1.7)")
     metagenome_parser.set_defaults(func=metagenome_command)
 
@@ -243,7 +301,7 @@ def register_classify_command(subparsers: argparse._SubParsersAction):
         description="Step 6: Classify taxonomy using QIIME2 feature-classifier classify-sklearn."
     )
     classify_parser.add_argument("--rep-seqs", type=str, required=True, metavar="PATH", help="Path to representative sequences (.qza or .fna)")
-    classify_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    classify_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     classify_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
     classify_parser.add_argument("--classifier-qza", type=str, metavar="PATH", help="Path to a custom QIIME2 classifier .qza file (default: Greengenes 2024.09)")
     classify_parser.set_defaults(func=classify_command)
@@ -257,6 +315,64 @@ def register_merge_command(subparsers: argparse._SubParsersAction):
     )
     merge_parser.add_argument("--seqtab-norm-gz", type=str, required=True, metavar="PATH", help="Path to normalized table (seqtab_norm.tsv.gz)")
     merge_parser.add_argument("--taxonomy-tsv", type=str, required=True, metavar="PATH", help="Path to classified taxonomy (taxonomy.tsv)")
-    merge_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_YYYY-MM-DD)")
+    merge_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     merge_parser.add_argument("--save-intermediates", action="store_true", help="Save intermediate .biom files")
     merge_parser.set_defaults(func=merge_command)
+
+def register_unstratify_pgpt_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'pgpt_unstratify' subcommand."""
+    unstrat_pgpt_parser = subparsers.add_parser(
+        "unstratify_pgpt",
+        help="Step 8: Generate unstratified PGPT table (PGPT x Sample)",
+        description="Run only the unstratified analysis. "
+                    "Takes PICRUSt2 KO predictions as input.")
+    # Required Input
+    unstrat_pgpt_parser.add_argument("-k", "--ko-predictions", type=str, required=True,
+        metavar="PATH", help="Path to unstratified KO predictions (e.g., 'pred_metagenome_unstrat.tsv.gz')")
+    
+    # Optional Output
+    unstrat_pgpt_parser.add_argument("-o", "--output",type=str,metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
+    unstrat_pgpt_parser.set_defaults(func=unstratify_pgpt_command)
+    unstrat_pgpt_parser.add_argument("--pgpt-level", type=str, default="Lv3",
+        choices=['Lv1', 'Lv2', 'Lv3', 'Lv4', 'Lv5'],
+        metavar="LEVEL",
+        help="PGPT hierarchical level to use for analysis (default: %(default)s)")
+
+def register_stratify_pgpt_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'stratify' subcommand."""
+    
+    stratify_parser = subparsers.add_parser(
+        "stratify",
+        help="Step 9: Run stratified analysis (e.g., Genus x PGPT x Sample)",
+        description="Run the stratified analysis on outputs from 'pgptracker process'. "
+                    "This answers: 'Which taxon contributes to which PGPT?'")
+    
+    # Input files
+    input_group = stratify_parser.add_argument_group("input files (outputs from 'pgptracker process')")
+    input_group.add_argument("-i", "--merged-table", type=str, required=True, metavar="PATH",
+        help="Path to the merged table (e.g., 'norm_wt_feature_table.tsv')")
+    
+    input_group.add_argument("-k", "--ko-predictions", type=str, required=True, metavar="PATH",
+        help="Path to KO predictions (e.g., 'KO_predicted.tsv.gz')")
+    
+    # Parameters
+    params_group = stratify_parser.add_argument_group("analysis parameters")
+    params_group.add_argument("-l", "--tax-level", type=str, default="Genus",
+        choices=['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'],
+        help="Taxonomic level to stratify by (default: %(default)s)")
+    
+    # params_group.add_argument("-b", "--batch-size", type=int,
+    #     default=500, metavar="INT",
+    #     help="Number of taxa to process per batch (default: %(default)s)")
+    
+    stratify_parser.add_argument("--pgpt-level", type=str, default="Lv3",
+        choices=['Lv1', 'Lv2', 'Lv3', 'Lv4', 'Lv5'],
+        metavar="LEVEL",
+        help="PGPT hierarchical level to use for analysis (default: %(default)s)")
+    
+    # Output
+    output_group = stratify_parser.add_argument_group("output options")
+    output_group.add_argument("-o", "--output", type=str, metavar="PATH",
+        help="Output directory (default: results/run_DD-MM-YYYY)")
+    
+    stratify_parser.set_defaults(func=stratify_pgpt_command)
