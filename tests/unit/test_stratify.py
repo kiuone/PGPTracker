@@ -139,7 +139,6 @@ def test_generate_stratified_analysis_e2e(
         output_dir=output_dir,
         taxonomic_level="Genus",
         pgpt_level="Lv3",
-        batch_size=1 # Force 2 batches
     )
     
     assert result_path.exists()

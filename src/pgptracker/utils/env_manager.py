@@ -22,7 +22,7 @@ ENV_MAP = {
 }
 
 def detect_available_cores() -> int:
-    return psutil.cpu_count(logical=False) or 1
+    return psutil.cpu_count(logical=True) or 1
 
 def detect_available_memory() -> float:
     """

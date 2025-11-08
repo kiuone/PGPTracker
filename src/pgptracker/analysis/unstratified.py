@@ -128,17 +128,22 @@ def generate_unstratified_pgpt(
         on='Sample',
         aggregate_function='sum'
     ).fill_null(0.0)
-
+    
+    # Sort before saving
+    pgpt_wide = pgpt_wide.sort(pgpt_level)
+    
+    # 7. Save
     output_path = output_dir / f"unstratified_pgpt_{pgpt_level}_abundances.tsv"
+    pgpt_wide.write_csv(output_path, separator='\t')
 
     try:
-        snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3)
+        snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3).sort(pgpt_level).head(3)
         
         print("\n--- Output Preview: First 3 rows ---")
         with pl.Config(
             set_fmt_str_lengths=25,
-            tbl_width_chars=160,
-            tbl_rows=3,
+            tbl_width_chars=180,
+            # tbl_rows=3,
             tbl_cols=4,
             tbl_hide_dataframe_shape=True,
             tbl_hide_column_data_types=True
@@ -148,6 +153,6 @@ def generate_unstratified_pgpt(
         print(f"  [Warning] Could not display output preview: {e}")
     
     # 7. Save
-    pgpt_wide.write_csv(output_path, separator='\t')
+    # pgpt_wide.write_csv(output_path, separator='\t')
     
     return output_path

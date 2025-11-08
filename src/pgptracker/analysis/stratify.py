@@ -348,19 +348,24 @@ def generate_stratified_analysis(
         # batch_size
     )
 
+    # Sort the output file
+    print(f"  -> Sorting output by {taxonomic_level}, Sample...")
+    df_sorted = pl.read_csv(output_path, separator='\t').sort([taxonomic_level, pgpt_level, 'Sample'])
+    df_sorted.write_csv(output_path, separator='\t')
+
     # Display output preview (first 3 rows, all columns)
     try:
         snippet_df = pl.read_csv(
             output_path,
             separator='\t',
             n_rows=3
-        )
+        ).sort([taxonomic_level, pgpt_level, 'Sample']).head(3)
         
         print("\n--- Output Preview: First 3 rows, All columns ---")
         with pl.Config(
             set_fmt_str_lengths=25,
             tbl_width_chars=160,
-            tbl_rows=3,
+            # tbl_rows=3,
             tbl_cols=4,
             tbl_hide_dataframe_shape=True,
             tbl_hide_column_data_types=True
