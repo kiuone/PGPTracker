@@ -301,7 +301,7 @@ def run_interactive_mode() -> int:
         print("─" * 60)
         for key, (cmd_name, description, _, _) in SUBCOMMANDS.items():
             print(f"  [{key}] {description}")
-        print("  [q] Quit")
+        print("  [q] Quit (or Ctrl + C to abort process in any moment)")
         print("─" * 60)
         
         # Get user choice

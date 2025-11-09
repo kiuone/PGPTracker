@@ -18,6 +18,7 @@ import io
 from pathlib import Path
 import time
 from pgptracker.analysis.unstratified import load_pathways_db
+from pgptracker.utils.profiler import profile_memory
 
 def load_seqtab_with_taxonomy(path: Path, tax_level: str) -> pl.DataFrame:
     """
@@ -113,6 +114,7 @@ def load_ko_predicted(path: Path) -> pl.DataFrame:
     print(f"  -> Loaded: {len(df)} ASVs × {len(ko_cols)} KOs")
     return df
 
+@profile_memory
 def aggregate_by_tax_level_sample(seqtab: pl.DataFrame, tax_level: str) -> pl.DataFrame:
     """
     Step 1 (Aggregation): Aggregates ASV abundances by tax_level and sample.
@@ -144,6 +146,7 @@ def aggregate_by_tax_level_sample(seqtab: pl.DataFrame, tax_level: str) -> pl.Da
     print(f"  -> Step 1 Result: {len(tax_abun)} '{tax_level}'-Sample pairs")
     return tax_abun
 
+@profile_memory
 def aggregate_by_tax_level_ko(
     ko_predicted: pl.DataFrame,
     seqtab: pl.DataFrame,
@@ -185,7 +188,7 @@ def aggregate_by_tax_level_ko(
     print(f"  -> Step 2 Result: {len(tax_ko)} '{tax_level}'-KO pairs")
     return tax_ko
 
-# DEPOIS (Implementando sua otimização: iterar sobre os grupos)
+@profile_memory
 def join_and_calculate_batched(
     tax_abun: pl.DataFrame,
     tax_ko: pl.DataFrame,
@@ -294,6 +297,7 @@ def join_and_calculate_batched(
     elapsed = time.time() - start_time
     print(f"  -> Export complete: {total_rows:,} rows × {total_columns} columns processed in: ({elapsed:.1f}s)")
 
+@profile_memory
 def generate_stratified_analysis(
     merged_table_path: Path,
     ko_predicted_path: Path,

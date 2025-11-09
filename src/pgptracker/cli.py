@@ -19,13 +19,16 @@ import argparse
 import sys
 import importlib.resources
 import subprocess
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
 from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 from pgptracker import pipeline
 from pgptracker import subcommands
 from pgptracker.interactive import run_interactive_mode
+from pgptracker.utils.profiler import MemoryProfiler
+from pgptracker.utils.profile_reporter import generate_tsv_report, print_pretty_table
+from pgptracker.utils.profile_config import use_preset
 
 def setup_command(args: argparse.Namespace) -> int:
     """
@@ -129,10 +132,20 @@ def create_parser() -> argparse.ArgumentParser:
         required=True,
         help="Available commands:'process' (full pipeline), 'setup', or individual steps ('export', 'classify', etc.)"
     )
+
+    parent_parser = argparse.ArgumentParser(add_help=False)
+    parent_parser.add_argument(
+        '--profile',
+        choices=['production', 'debug', 'minimal'], # Agora é uma escolha
+        nargs='?', # O '?' torna o argumento opcional
+        const='production', # Se usar só --profile, usa 'production'
+        help='Enable memory profiling with a specific level'
+    )
     
     # Process command (the main pipeline)
     process_parser = subparsers.add_parser(
         "process",
+        parents=[parent_parser],
         help="Run the full pipeline (ASVs -> PGPTs)",
         description="Run the full PGPTracker pipeline from input sequences and table to final PGPT analysis."
     )
@@ -288,7 +301,6 @@ def process_command(args: argparse.Namespace) -> int:
     Delegates to interactive mode or the core pipeline.
     """
     if args.interactive:
-        # Call the guided prompt mode
         return run_interactive_mode()
     
     # Check for required args in non-interactive mode
@@ -296,11 +308,14 @@ def process_command(args: argparse.Namespace) -> int:
         print("ERROR: --rep_seqs and --feature_table are required in non-interactive mode", file=sys.stderr)
         print("       (or, use the '-i' flag for interactive mode)", file=sys.stderr)
         return 1
-        
+    
     # Call the core pipeline logic
     print("\nPGPTracker - Full Process Pipeline (Stage 1)")
     print()
-    return pipeline.run_pipeline(args)
+    
+    exit_code = pipeline.run_pipeline(args)
+    
+    return exit_code
 
 def main() -> int:
     """
@@ -311,21 +326,15 @@ def main() -> int:
     """
     parser = create_parser()
     
-    # Handle case where no command is given, or just -i
-    if len(sys.argv) == 1 or (len(sys.argv) == 2 and sys.argv[1] == '-i'):
-        # Force interactive mode if only '-i' is given
-        if len(sys.argv) == 2 and sys.argv[1] == '-i':
-            return run_interactive_mode()
+    # Handle case where no command is given
+    if len(sys.argv) == 1:
         parser.print_help(sys.stderr)
         return 1
     
-    # Special case: 'pgptracker -i' is ambiguous.
-    # We map 'pgptracker -i' to 'pgptracker process -i'
-    if sys.argv[1] == '-i':
-        # Re-route to process command
-        sys.argv[1] = 'process'
-        sys.argv.append('-i')
-        
+    # Special case: 'pgptracker -i' → 'pgptracker process -i'
+    if len(sys.argv) == 2 and sys.argv[1] == '-i':
+        return run_interactive_mode()
+    
     args = parser.parse_args()
     
     # Dispatch to the correct function based on the subcommand
@@ -340,48 +349,9 @@ def main() -> int:
             traceback.print_exc(file=sys.stderr)
             return 1
     
-    # Fallback if no command is somehow given (should be caught by required=True)
+    # Fallback if no command is given (should be caught by required=True)
     parser.print_help()
     return 1
 
 if __name__ == "__main__":
     sys.exit(main())
-
-# def main() -> int:
-#     """
-#     Main entry point for the CLI application.
-    
-#     Returns:
-#         int: Exit code (0 for success, non-zero for errors).
-#     """
-#     parser = create_parser()
-
-#     if len(sys.argv) == 1:
-#         parser.print_help(sys.stderr)
-#         return 1
-    
-#     args = parser.parse_args()
-
-#     # Dispatch to the correct function based on the subcommand
-#     # The 'func' default is set during 'add_parser'
-#     if hasattr(args, 'func'):
-#         try:
-#             return args.func(args)
-#         except Exception as e:
-#             # Global catch-all for unexpected errors
-#             print(f"\n[UNHANDLED ERROR] An unexpected error occurred: {e}", file=sys.stderr)
-#             print("Please report this issue on GitHub.", file=sys.stderr)
-#             return 1
-        
-#     if args.command == "process":
-#         return process_command(args)
-#     elif args.command == "setup":
-#         return setup_command(args)
-
-#     # Fallback if no command is somehow given.
-#     # Should not reach here due to required=True
-#     parser.print_help()
-#     return 1
-
-# if __name__ == "__main__":
-#     sys.exit(main())

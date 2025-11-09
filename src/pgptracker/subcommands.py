@@ -240,12 +240,23 @@ def stratify_pgpt_command(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[STRATIFY ERROR] Analysis failed: {e}", file=sys.stderr)
         return 1
+    
+parent_parser = argparse.ArgumentParser(add_help=False)
+parent_parser.add_argument(
+    '--profile',
+    choices=['production', 'debug', 'minimal'],
+    nargs='?',
+    const='production',
+    default=None,
+    help='Enable memory profiling (default preset if flag is used: production)'
+)
 
 # Registration Functions (Argument Parsers)
 def register_export_command(subparsers: argparse._SubParsersAction):
     """Registers the 'export' subcommand."""
     export_parser = subparsers.add_parser(
         "export",
+        parents=[parent_parser],
         help="Step 2: Export QIIME2 .qza files to .fna/.biom",
         description="Step 2: Export QIIME2 .qza files to standard .fna and .biom formats."
     )
@@ -258,6 +269,7 @@ def register_place_seqs_command(subparsers: argparse._SubParsersAction):
     """Registers the 'place_seqs' subcommand."""
     place_seqs_parser = subparsers.add_parser(
         "place_seqs",
+        parents=[parent_parser],
         help="Step 3: Build phylogenetic tree (PICRUSt2 place_seqs.py)",
         description="Step 3: Build phylogenetic tree by placing sequences into reference tree using PICRUSt2 place_seqs.py."
     )
@@ -270,6 +282,7 @@ def register_hsp_command(subparsers: argparse._SubParsersAction):
     """Registers the 'hsp' subcommand."""
     predict_parser = subparsers.add_parser(
         "hsp",
+        parents=[parent_parser],
         help="Step 4: Predict gene content (PICRUSt2 hsp.py)",
         description="Step 4: Predict gene content (16S copy number and KOs) using PICRUSt2 hsp.py."
     )
@@ -283,6 +296,7 @@ def register_metagenome_command(subparsers: argparse._SubParsersAction):
     """Registers the 'metagenome' subcommand."""
     metagenome_parser = subparsers.add_parser(
         "metagenome",
+        parents=[parent_parser],
         help="Step 5: Normalize abundances (PICRUSt2 metagenome_pipeline.py)",
         description="Step 5: Normalize abundances by 16S copy number and create KO abundance table using PICRUSt2 metagenome_pipeline.py."
     )
@@ -297,6 +311,7 @@ def register_classify_command(subparsers: argparse._SubParsersAction):
     """Registers the 'classify' subcommand."""
     classify_parser = subparsers.add_parser(
         "classify",
+        parents=[parent_parser],
         help="Step 6: Classify taxonomy (QIIME2 classify-sklearn)",
         description="Step 6: Classify taxonomy using QIIME2 feature-classifier classify-sklearn."
     )
@@ -310,6 +325,7 @@ def register_merge_command(subparsers: argparse._SubParsersAction):
     """Registers the 'merge' subcommand."""
     merge_parser = subparsers.add_parser(
         "merge",
+        parents=[parent_parser],
         help="Step 7: Merge taxonomy into normalized feature table",
         description="Step 7: Merge the QIIME2 taxonomy file into the PICRUSt2 normalized BIOM table."
     )
@@ -323,6 +339,7 @@ def register_unstratify_pgpt_command(subparsers: argparse._SubParsersAction):
     """Registers the 'pgpt_unstratify' subcommand."""
     unstrat_pgpt_parser = subparsers.add_parser(
         "unstratify_pgpt",
+        parents=[parent_parser],
         help="Step 8: Generate unstratified PGPT table (PGPT x Sample)",
         description="Run only the unstratified analysis. "
                     "Takes PICRUSt2 KO predictions as input.")
@@ -343,6 +360,7 @@ def register_stratify_pgpt_command(subparsers: argparse._SubParsersAction):
     
     stratify_parser = subparsers.add_parser(
         "stratify",
+        parents=[parent_parser],
         help="Step 9: Run stratified analysis (e.g., Genus x PGPT x Sample)",
         description="Run the stratified analysis on outputs from 'pgptracker process'. "
                     "This answers: 'Which taxon contributes to which PGPT?'")
