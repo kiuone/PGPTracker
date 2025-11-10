@@ -263,4 +263,3 @@ def use_preset(preset_name: str):
         )
     
     set_config(presets[preset_name])
-    print(f"[INFO] Applied profiler preset: {preset_name}")

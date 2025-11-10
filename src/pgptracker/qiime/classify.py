@@ -41,35 +41,27 @@ def _get_default_classifier() -> Path:
 
     print(f"  -> Default classifier not found. Downloading to cache:\n     {classifier_path}")
     
-    try:
-        with requests.get(CLASSIFIER_URL, stream=True) as r:
-            r.raise_for_status()
-            total_size = int(r.headers.get('content-length', 0))
-            
-            progress_bar = tqdm(
-                total=total_size, 
-                unit='iB', 
-                unit_scale=True,
-                desc="Downloading Greengenes"
-            )
-            
-            with open(classifier_path, 'wb') as f:
-                for chunk in r.iter_content(chunk_size=8192): 
-                    progress_bar.update(len(chunk))
-                    f.write(chunk)
-            progress_bar.close()
+    with requests.get(CLASSIFIER_URL, stream=True) as r:
+        r.raise_for_status()
+        total_size = int(r.headers.get('content-length', 0))
+        
+        progress_bar = tqdm(
+            total=total_size, 
+            unit='iB', 
+            unit_scale=True,
+            desc="Downloading Greengenes")
+        
+        with open(classifier_path, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=8192): 
+                progress_bar.update(len(chunk))
+                f.write(chunk)
+        progress_bar.close()
 
-        if total_size != 0 and progress_bar.n != total_size:
-            raise IOError("Download incomplete.")
+    if total_size != 0 and progress_bar.n != total_size:
+        raise IOError("Download incomplete.")
 
-        print("  -> Download complete.")
-        return classifier_path
-
-    except (requests.RequestException, IOError, OSError) as e:
-        print(f"[ERROR] Failed to download classifier: {e}", file=sys.stderr)
-        if classifier_path.exists():
-            classifier_path.unlink() # Remove incomplete file
-        raise RuntimeError(f"Failed to download default classifier from {CLASSIFIER_URL}") from e
+    print("  -> Download complete.")
+    return classifier_path
 
 def classify_taxonomy(
 rep_seqs_path: Path,
@@ -97,21 +89,17 @@ Raises:
     """
     # Resolve classifier path
     classifier_to_use = None
-    try:
-        if classifier_qza_path:
-            # 1. User provided a custom classifier (Path)
-            print(f"  -> Using custom classifier from: {classifier_qza_path}")
-            if not classifier_qza_path.exists():
-                raise FileNotFoundError(f"Custom classifier not found: {classifier_qza_path}")
-            classifier_to_use = classifier_qza_path
-        else:
-            # 2. User did NOT provide a path, get default (download or cache)
-            # Removed redundant print statement
-            classifier_to_use = _get_default_classifier()
 
-    except (RuntimeError, IOError, FileNotFoundError) as e:
-        print(f"\n[CLASSIFIER ERROR] Failed to get classifier: {e}", file=sys.stderr)
-        raise RuntimeError("Failed to resolve classifier path.") from e
+    if classifier_qza_path:
+        # 1. User provided a custom classifier (Path)
+        print(f"  -> Using custom classifier from: {classifier_qza_path}")
+        if not classifier_qza_path.exists():
+            raise FileNotFoundError(f"Custom classifier not found: {classifier_qza_path}")
+        classifier_to_use = classifier_qza_path
+    else:
+        # 2. User did NOT provide a path, get default (download or cache)
+        # Removed redundant print statement
+        classifier_to_use = _get_default_classifier()
 
     # Import sequences to .qza if needed
     rep_seqs_qza_to_use = None
@@ -129,17 +117,9 @@ Raises:
                 "qiime", "tools", "import",
                 "--type", "FeatureData[Sequence]",
                 "--input-path", str(rep_seqs_path),
-                "--output-path", str(imported_qza)
-        ]
-
-        try:
-                run_command("qiime", cmd_import, check=True, capture_output=True)
-        except subprocess.CalledProcessError as e:
-                print(f"   [ERROR] QIIME2 tools import failed: {e.stderr}", file=sys.stderr)
-                raise RuntimeError("Failed to import .fna to .qza") from e
-
-        if not imported_qza.exists():
-                raise ValidationError("QIIME2 import created no output file.")
+                "--output-path", str(imported_qza)]
+   
+        run_command("qiime", cmd_import, check=True, capture_output=True)
 
         rep_seqs_qza_to_use = imported_qza
         print(f"     -> Successfully imported to {imported_qza}")
@@ -155,23 +135,15 @@ Raises:
     # step 1: run classify-sklearn
     print("    -> Running QIIME2 classify-sklearn (Bokulich et al., 2018)...")
 
-    try:
-        cmd_classify = [
-            "qiime", "feature-classifier", "classify-sklearn",
-            "--i-reads", str(rep_seqs_qza_to_use),
-            "--i-classifier", str(classifier_to_use),
-            "--o-classification", str(classified_qza),
-            "--p-n-jobs", str(threads)
-        ]
-        # Added capture_output=True (This was the missing one)
-        run_command("qiime", cmd_classify, check=True, capture_output=True)
-
-    except subprocess.CalledProcessError as e:
-        print(f"  [ERROR] QIIME2 classify-sklearn failed: {e.stderr}", file=sys.stderr)
-        raise RuntimeError("Taxonomic classification failed.") from e
-
-    if not classified_qza.exists():
-        raise ValidationError(f"QIIME2 failed to create {classified_qza}")
+    cmd_classify = [
+        "qiime", "feature-classifier", "classify-sklearn",
+        "--i-reads", str(rep_seqs_qza_to_use),
+        "--i-classifier", str(classifier_to_use),
+        "--o-classification", str(classified_qza),
+        "--p-n-jobs", str(threads)
+    ]
+    # Added capture_output=True (This was the missing one)
+    run_command("qiime", cmd_classify, check=True, capture_output=True)
 
     # step 2: exports .qza to .tsv
     cmd_export = [

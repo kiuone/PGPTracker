@@ -9,7 +9,10 @@ Author: Vivian Mello
 import polars as pl
 from pathlib import Path
 import importlib.resources
+from pgptracker.utils.profiler import profile_memory
 
+
+@profile_memory
 def load_pathways_db(pgpt_level: str) -> pl.DataFrame:
     """
 Loads and processes the bundled PLaBA pathways database.
@@ -17,7 +20,7 @@ Loads and processes the bundled PLaBA pathways database.
     This function finds the 'pathways_plabase.txt' file bundled inside the 
     package, loads it, and performs critical cleanup and transformation:
     
-    1.  Uses RegEx (r"-(K\d{5})$") to extract the 'KXXXXX' ID from the 
+    1.  Uses RegEx to extract the 'KXXXXX' ID from the 
         end of the 'PGPT_ID' string.
     2.  Harmonizes the ID by adding the 'ko:' prefix (e.g., 'K02584' -> 'ko:K02584')
         to match the KO prediction file format.
@@ -81,9 +84,11 @@ Loads and processes the bundled PLaBA pathways database.
         pl.col('KO').is_not_null() & pl.col(pgpt_level).is_not_null()
     ).select(['KO', pgpt_level]).unique()
     
-    print(f"  -> Found {len(df)} unique KO-to-PGPT mappings at level '{pgpt_level}'.")
+    print(f"  \n  -> Found {len(df)} unique KO-to-PGPT mappings at level '{pgpt_level}'.")
     return df
 
+
+@profile_memory
 def generate_unstratified_pgpt(
     unstrat_ko_path: Path,
     output_dir: Path,

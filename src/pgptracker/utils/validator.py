@@ -10,7 +10,7 @@ class ValidationError(Exception):
     pass
 
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Any
 
 def _validate_file(path: Path, file_type: str, valid_extensions: List[str]) -> List[str]:
     """
@@ -73,7 +73,7 @@ def validate_inputs(
     rep_seqs: str,
     feature_table: str,
     output_dir: str
-) -> Dict[str, any]:
+) -> Dict[str, Any]:
     """
     Validates all input files and output directory.
     

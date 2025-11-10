@@ -73,8 +73,7 @@ def identify_sample_columns(
         # Default: assume everything else is a sample
         sample_cols = [c for c in ftable.columns if c not in asv_and_tax_cols]
         if sample_cols:
-            print(f"  -> [Warning] Assuming all non-taxonomy columns are samples ({len(sample_cols)} found)")
-            print(f"     If incorrect, use --sample-prefix or --exclude-cols")
+            print(f"\n  -> [Warning] Assuming all non-taxonomy columns are samples ({len(sample_cols)} found). If incorrect, use --sample-prefix or --exclude-cols")
         else:
             raise ValueError("No sample columns identified. Check your feature table.")
     
@@ -187,17 +186,18 @@ def aggregate_by_tax_level_ko(
             ASV_002         Pseudomonas   ko:K00002  1.0
             ASV_003         Bacillus      ko:K00002  3.0
     """
-    asv_col = find_asv_column(ko_predicted)
+    asv_col_tax = find_asv_column(tax_abun)
+    asv_col_ko = find_asv_column(ko_predicted)
     
     # 1. Get taxonomy map (ASV_ID -> tax_level)
-    tax_map = tax_abun.select([asv_col, tax_level]).unique()
+    tax_map = tax_abun.select([asv_col_tax, tax_level]).unique()
     
     # Get KO columns
     ko_cols = [c for c in ko_predicted.columns if c.startswith('ko:')]
     
     # 2. Transform: Wide (ASV × KO) -> Long (ASV-KO pairs)
     ko_long = ko_predicted.unpivot(
-        index=asv_col,
+        index=asv_col_ko,
         on=ko_cols,
         variable_name='KO',
         value_name='Copy_Number'
@@ -207,7 +207,8 @@ def aggregate_by_tax_level_ko(
     ko_long = ko_long.filter(pl.col('Copy_Number') > 0)
     
     # 3. Join with taxonomy map
-    ko_with_tax = ko_long.join(tax_map, on=asv_col, how='inner')
+    ko_with_tax = ko_long.join(tax_map, left_on=asv_col_ko,
+                               right_on=asv_col_tax, how='inner')
     
     # 4.Aggregate: Mean copy number by (Taxon, KO)
     tax_ko = ko_with_tax.group_by([tax_level, 'KO']).agg(
@@ -262,7 +263,6 @@ def join_and_calculate_batched(
             Genus         Pathway          Sample    Total_PGPT_Abundance
             Pseudomonas   nitrogen_fixing  Sample_A  50.0
     """
-    print(f"\n  -> Starting Step 3: Join and Calculate (Optimized Group Iteration)...")
     start_time = time.time()
     
     # Pre-join: Map KOs to PGPTs (small operation)
@@ -288,11 +288,16 @@ def join_and_calculate_batched(
                 current_taxon = current_taxon_tuple[0] # Now ['GenusA'] correctly
                 
                 # print(f"-> Processing Group {i + 1}/{n_groups} ({current_taxon})", flush=True)
-                
+        
                 # Filter abundance data for this taxon
-                abun_batch = tax_abun.filter(pl.col(tax_level).is_in(current_taxon))
+                if current_taxon is None:
+                # Use .is_null() when the taxon group is None
+                    abun_batch = tax_abun.filter(pl.col(tax_level).is_null())
+                else:
+                # Use normal equality check for named taxa
+                    abun_batch = tax_abun.filter(pl.col(tax_level) == current_taxon)
 
-                joined = abun_batch.join(ko_pgpt_batch_df, on=tax_level, how='inner')
+                joined = abun_batch.join(ko_pgpt_batch_df, on=tax_level, how='inner', nulls_equal=True)
                 
                 # Calculate functional abundance
                 joined = joined.with_columns(
@@ -306,19 +311,25 @@ def join_and_calculate_batched(
 
                 # Process only if this batch (taxon) yielded results
                 if not result.is_empty():
-                    # 1. Write this batch (as TSV) directly to the gzipped file stream
-                    result.write_csv(
-                        f_text,  # Write directly to the open text wrapper
-                        separator='\t',
-                        include_header=first_batch)
-                    f_text.flush() # Force write to disk
-                    # 2. Toggle the header flag off after the first pass
+                    # 1. Write to an in-memory buffer (StringIO) first, because if not
+                    # polars can't read the zipped file for some reason
+                    string_buffer = io.StringIO()
+                    result.write_csv(string_buffer, separator='\t', include_header=first_batch)
+                    
+                    # 2. Get the string from the buffer and write to the gzipped file
+                    csv_string = string_buffer.getvalue()
+                    f_text.write(csv_string)
+                    f_text.flush()  # Force flush to ensure data is written
+                    
+                    # 3. Toggle the header flag off after the first pass
                     if first_batch:
                         first_batch = False
-                    # 3. Update running totals for the final log message
+
+                    # 4. Update running totals for the final log message
                     total_rows += len(result)
                     if total_columns == 0:
                         total_columns = len(result.columns)
+
                 
                 # Cleanup memory
                 del abun_batch, ko_pgpt_batch_df, joined, result
@@ -381,7 +392,7 @@ def generate_stratified_analysis(
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{taxonomic_level.lower()}_stratified_pgpt.tsv.gz"
     
-    print(f"Starting stratified analysis for level: '{taxonomic_level}'")
+    print(f"\n  Starting stratified analysis for selected level: '{taxonomic_level}'")
     
     # 1. Load data
     # Load feature table normalized with taxonomy (norm_wt_feature_table.tsv)
@@ -395,13 +406,13 @@ def generate_stratified_analysis(
     # Drop metadata from KO_predicted.tsv.gz
     cols_to_drop = [c for c in ko_df.columns if c.startswith('metadata_') or c == 'closest_reference_genome']
     ko_df = ko_df.drop(cols_to_drop)
-    
+
     # 4. Load PLaBAse that constains the pathways to link KO -> PGPT 
     pathways = load_pathways_db(pgpt_level=pgpt_level) # Uses the imported function from unstratified.py
     
     # 5. Aggregate (Reduce data BEFORE join)
     tax_abun = aggregate_by_tax_level_sample(ftable, taxonomic_level, sample_cols, keep_unclassified)
-    tax_ko = aggregate_by_tax_level_ko(ko_df, tax_abun, taxonomic_level)
+    tax_ko = aggregate_by_tax_level_ko(ko_df, ftable, taxonomic_level)
     
     # Clean up large dataframes
     del ftable, ko_df
@@ -417,7 +428,6 @@ def generate_stratified_analysis(
         pgpt_level,)
 
     # Sort the output file
-    print(f"  -> Sorting output by {taxonomic_level}, Sample...")
     df_sorted = pl.read_csv(output_path, separator='\t').sort([taxonomic_level, pgpt_level, 'Sample'])
     df_sorted.write_csv(output_path, separator='\t')
 

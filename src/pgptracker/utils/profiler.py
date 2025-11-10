@@ -61,7 +61,6 @@ class MemoryProfiler:
             # Get baseline memory (current, peak)
             baseline_mem, _ = cls._get_current_memory() 
             cls._baseline_memory = baseline_mem
-            print("[INFO] Memory profiling enabled")
     
     @classmethod
     def disable(cls):
@@ -172,7 +171,7 @@ def profile_memory(func: Callable) -> Callable:
         output_shapes = ""
         if config.track_dataframe_shapes:
             input_shapes = _extract_shapes(args, kwargs)
-            output_shapes = _extract_shapes((result), {})
+            output_shapes = _extract_shapes((result,), {})
         
         # Create profile record
         profile = FunctionProfile(
@@ -207,9 +206,14 @@ def _extract_shapes(args: tuple, kwargs: dict) -> str:
         String representation of shapes (e.g., "12000x66, 500x50")
     """
     shapes = []
+
+    if args is None: # Check 1: Prevent crash if args tuple itself is None
+        args = ()
     
     # Check args
     for arg in args:
+        if arg is None: # Check 2: Skip None values inside the tuple (eg. (None, None))
+            continue
         if isinstance(arg, pl.DataFrame):
             shapes.append(f"{arg.height}×{arg.width}")
         elif isinstance(arg, pl.LazyFrame):
@@ -217,6 +221,8 @@ def _extract_shapes(args: tuple, kwargs: dict) -> str:
     
     # Check kwargs
     for value in kwargs.values():
+        if value is None: # Check 3: Skip None values from kwargs
+            continue
         if isinstance(value, pl.DataFrame):
             shapes.append(f"{value.height}×{value.width}")
         elif isinstance(value, pl.LazyFrame):

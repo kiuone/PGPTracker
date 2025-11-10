@@ -22,13 +22,14 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
-from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 from pgptracker import pipeline
 from pgptracker import subcommands
 from pgptracker.interactive import run_interactive_mode
 from pgptracker.utils.profiler import MemoryProfiler
+from pgptracker.subcommands import parent_parser
+from pgptracker.utils.profile_config import use_preset, get_config
 from pgptracker.utils.profile_reporter import generate_tsv_report, print_pretty_table
-from pgptracker.utils.profile_config import use_preset
+from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 
 def setup_command(args: argparse.Namespace) -> int:
     """
@@ -132,16 +133,6 @@ def create_parser() -> argparse.ArgumentParser:
         required=True,
         help="Available commands:'process' (full pipeline), 'setup', or individual steps ('export', 'classify', etc.)"
     )
-
-    parent_parser = argparse.ArgumentParser(add_help=False)
-    parent_parser.add_argument(
-        '--profile',
-        choices=['production', 'debug', 'minimal'], 
-        nargs='?', 
-        const='production', 
-        default=None,
-        help='Enable memory profiling (default preset if flag is used: production)'
-    )
     
     # Process command (the main pipeline)
     process_parser = subparsers.add_parser(
@@ -244,13 +235,6 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         metavar="LEVEL",
         help="Taxonomic level for stratified analysis (default: Genus)"
     )
-    # params_group.add_argument(
-    #     "--batch-size",
-    #     type=int,
-    #     default=500,
-    #     metavar="INT",
-    #     help="Number of taxa per batch for stratified analysis (default: 500)"
-    # )
 
     params_group.add_argument(
         "--pgpt-level",
@@ -259,12 +243,6 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
         choices=['Lv1', 'Lv2', 'Lv3', 'Lv4', 'Lv5'],
         metavar="LEVEL",
         help="PGPT hierarchical level to use for analysis (default: Lv3)"
-    )
-    
-    params_group.add_argument(
-        "--save-intermediates",
-        action="store_true",
-        help="Save all intermediate files for debugging"
     )
     
     # Output options group
@@ -320,10 +298,24 @@ def process_command(args: argparse.Namespace) -> int:
 
 def main() -> int:
     """
-    Main entry point for the CLI application.
-    
+    The main entry point for the PGPTracker CLI application.
+
+    This function orchestrates the main CLI execution flow:
+    1.  Parses all command-line arguments using `argparse`.
+    2.  Handles special cases (e.g., no arguments or the `-i` shortcut).
+    3.  Checks for the `--profile` flag. If present, it enables the
+        `MemoryProfiler` globally before any command is executed.
+    4.  Delegates execution to the appropriate subcommand function
+        (e.g., `process_command`, `setup_command`) registered in `args.func`.
+    5.  After the subcommand completes (if it doesn't crash), checks again
+        if profiling was enabled.
+    6.  If profiling was enabled, it disables the profiler and triggers
+        the generation of reports (both a .tsv file in the output
+        directory and a summary table printed to the console).
+
     Returns:
-        int: Exit code (0 for success, non-zero for errors).
+        int: The exit code for the shell. `0` indicates success,
+             while any non-zero value (typically `1`) indicates an error.
     """
     parser = create_parser()
     
@@ -337,18 +329,42 @@ def main() -> int:
         return run_interactive_mode()
     
     args = parser.parse_args()
-    
+
+    # Check if the --profile flag was used
+    if args.profile:
+        print(f"[INFO] Enabling profiler with preset: {args.profile}")
+        use_preset(args.profile)
+        MemoryProfiler.enable()
+
+    exit_code = 1 # Default exit code on error
+
     # Dispatch to the correct function based on the subcommand
     if hasattr(args, 'func'):
-        try:
-            return args.func(args)
-        except Exception as e:
-            # Global catch-all for unexpected errors
-            print(f"\n[UNHANDLED ERROR] An unexpected error occurred: {e}", file=sys.stderr)
-            print("Please report this issue on GitHub.", file=sys.stderr)
-            import traceback
-            traceback.print_exc(file=sys.stderr)
-            return 1
+        # Run the selected command (e.g., process_command, export_command)
+        exit_code = args.func(args)
+        
+        # This code only runs if args.func() completes successfully.
+        if args.profile and MemoryProfiler.is_enabled():
+            MemoryProfiler.disable()
+            
+            config = get_config()
+            
+            # 1. Generate TSV
+            # Determine output dir: use subcommand's dir, or default
+            output_dir = Path("results") # Default
+            if hasattr(args, 'output') and args.output:
+                output_dir = Path(args.output)
+            
+            output_dir.mkdir(parents=True, exist_ok=True)
+            report_path = output_dir / f"pgptracker_profile_{args.profile}_{datetime.now():%Y%m%d_%H%M%S}.tsv"
+
+            generate_tsv_report(report_path)
+
+            # 2. Print Pretty Table
+            if config.show_pretty_table:
+                print_pretty_table()
+        
+        return exit_code
     
     # Fallback if no command is given (should be caught by required=True)
     parser.print_help()
@@ -356,3 +372,4 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+

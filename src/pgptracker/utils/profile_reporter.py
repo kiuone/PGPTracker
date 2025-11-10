@@ -8,7 +8,7 @@ Author: Vivian Mello
 """
 
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Any, Sequence
 # Import get_profiling_summary, remove FunctionProfile (not directly used here)
 from pgptracker.utils.profiler import MemoryProfiler, get_profiling_summary, FunctionProfile
 # Only import get_config, as warnings functions will be moved here
@@ -174,7 +174,7 @@ def print_top_consumers(n: int = 5):
 # Functions moved from profile_config.py for better Separation of Concerns
 # ---------------------------------------------------------------------
 
-def get_warnings(profiles: List[FunctionProfile]) -> List[Tuple[FunctionProfile, str]]:
+def get_warnings(profiles: Sequence[Any]) -> List[Tuple[Any, str]]:
     """
     Get list of profiles that exceeded warning thresholds.
     

@@ -174,7 +174,6 @@ def merge_command(args: argparse.Namespace) -> int:
             seqtab_norm_gz=seqtab_gz_path,
             taxonomy_tsv=tax_tsv_path,
             output_dir=output_dir,
-            save_intermediates=args.save_intermediates
         )
         print(f"\nTable merge successful:")
         print(f"  -> Final merged table: {merged_path}")
@@ -185,7 +184,6 @@ def merge_command(args: argparse.Namespace) -> int:
     
 def unstratify_pgpt_command(args: argparse.Namespace) -> int:
     """Handler for the 'pgpt_unstratify' subcommand."""
-    print("Running PGPTracker Unstratified Analysis...")
     try:
         # 1. Validate input
         ko_path = Path(args.ko_predictions)
@@ -212,7 +210,6 @@ def unstratify_pgpt_command(args: argparse.Namespace) -> int:
     
 def stratify_pgpt_command(args: argparse.Namespace) -> int:
     """Handler for the 'stratify' subcommand."""
-    print("Running PGPTracker Stratified Analysis...")
     try:
         # 1. Validate input files
         merged_table = Path(args.merged_table)
@@ -332,7 +329,6 @@ def register_merge_command(subparsers: argparse._SubParsersAction):
     merge_parser.add_argument("--seqtab-norm-gz", type=str, required=True, metavar="PATH", help="Path to normalized table (seqtab_norm.tsv.gz)")
     merge_parser.add_argument("--taxonomy-tsv", type=str, required=True, metavar="PATH", help="Path to classified taxonomy (taxonomy.tsv)")
     merge_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
-    merge_parser.add_argument("--save-intermediates", action="store_true", help="Save intermediate .biom files")
     merge_parser.set_defaults(func=merge_command)
 
 def register_unstratify_pgpt_command(subparsers: argparse._SubParsersAction):
