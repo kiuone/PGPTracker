@@ -48,7 +48,6 @@ def validate_output_file(
 ) -> None:
     """
     Validates that a tool's output file exists and is not empty.
-    (Replaces duplicated inline validation checks).
 
     Args:
     path: Path to the output file
@@ -136,25 +135,14 @@ def validate_inputs(
                 f"  Valid combinations: (.qza + .qza) OR (.fna/.fasta + .biom)"
             )
     
-    # Validate output directory
-    if out_path.exists() and not out_path.is_dir():
-        errors.append(
-            f"Output path exists but is not a directory: {output_dir}"
-        )
-    
     # Raise all errors at once
     if errors:
         error_msg = "Input validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         raise ValidationError(error_msg)
     
     # Create output directory if it doesn't exist
-    try:
-        out_path.mkdir(parents=True, exist_ok=True)
-    except PermissionError as e:
-        raise ValidationError(f"Cannot create output directory (PermissionError): {output_dir}")
-    except Exception as e:
-        raise ValidationError(f"Failed to create output directory: {e}")
-    
+    out_path.mkdir(parents=True, exist_ok=True)
+
     # Return validated inputs with detected formats
     return {
         'sequences': seq_path,
@@ -163,3 +151,10 @@ def validate_inputs(
         'seq_format': 'qza' if seq_path.suffix == '.qza' else 'fasta',
         'table_format': 'qza' if table_path.suffix == '.qza' else 'biom'
     }
+
+def find_asv_column(df):
+    ASV_ID_CANDIDATES = ['OTU/ASV_ID', 'ASV_ID', 'OTU_ID', '#OTU ID', 'sequence']
+    asv_col = next((c for c in ASV_ID_CANDIDATES if c in df.columns), None)
+    if asv_col is None:
+        raise ValueError(f"ASV column not found. Expected: {ASV_ID_CANDIDATES}")
+    return asv_col

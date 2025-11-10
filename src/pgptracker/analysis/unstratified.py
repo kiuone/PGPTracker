@@ -12,39 +12,57 @@ import importlib.resources
 
 def load_pathways_db(pgpt_level: str) -> pl.DataFrame:
     """
-    Loads the bundled PLaBA pathways database from within the package
-    and extracts the KO-to-PGPT mapping based on the specified level.
+Loads and processes the bundled PLaBA pathways database.
+
+    This function finds the 'pathways_plabase.txt' file bundled inside the 
+    package, loads it, and performs critical cleanup and transformation:
     
+    1.  Uses RegEx (r"-(K\d{5})$") to extract the 'KXXXXX' ID from the 
+        end of the 'PGPT_ID' string.
+    2.  Harmonizes the ID by adding the 'ko:' prefix (e.g., 'K02584' -> 'ko:K02584')
+        to match the KO prediction file format.
+    3.  Filters out any rows that failed the RegEx (KO is null) or have 
+        no PGPT assigned at the specified level (pgpt_level is null).
+    4.  Selects only the 'KO' column and the specific 'pgpt_level' requested.
+    5.  Removes duplicates to create a clean, 2-column (KO -> PGPT) lookup map.
+
     Args:
         pgpt_level: The hierarchical level to use (e.g., 'Lv3', 'Lv4').
-    
+
     Returns:
-        A Polars DataFrame with ['KO', 'PGPT_ID'] columns.
+        A Polars DataFrame (lookup map) with two columns: ['KO', pgpt_level].
+    
+    Example:
+        If `pgpt_level='Lv3'`, this function transforms the raw file:
+
+        | PGPT_ID                 | Lv3                    | ... (other columns) |
+        | :---                    | :---                   | :--- |
+        | ...-K02584              | NITROGEN_ACQUISITION   | ... |
+        | ...-K02585              | NITROGEN_ACQUISITION   | ... |
+        | ...-K02586              | NITROGEN_ACQUISITION   | ... |
+        | ...-K02586              | NITROGEN_ACQUISITION   | ... |
+        | PGPT_NO_KO_ID           | SOME_PGPT              | ... |
+        | ...-K00000              | Null                   | ... |
+        
+        Into this final, clean DataFrame:
+        
+        | KO        | Lv3                    |
+        | :---      | :---                   |
+        | ko:K02584 | NITROGEN_ACQUISITION   |
+        | ko:K02585 | NITROGEN_ACQUISITION   |
+        | ko:K02586 | NITROGEN_ACQUISITION   |
     """
     db_filename = "pathways_plabase.txt"
-    
-    try:
-        # 1. Find the bundled file path
-        with importlib.resources.as_file(
-            importlib.resources.files("pgptracker.databases").joinpath(db_filename)
-        ) as p:
-            db_path = p
-        
-        if not db_path.exists():
-            raise FileNotFoundError 
-            
-    except Exception as e:
-        print(f"  [ERROR] Critical: Bundled database file '{db_filename}' not found.")
-        print("          Ensure 'src/pgptracker/databases/' contains the file and 'setup.py' includes it.")
-        raise RuntimeError(f"Failed to load bundled database: {db_filename}") from e
+
+    # 1. Find the bundled file path
+    with importlib.resources.as_file(
+        importlib.resources.files("pgptracker.databases").joinpath(db_filename)
+    ) as p:
+        db_path = p
 
     # 2. Load and process the file using Polars
     df = pl.read_csv(db_path, separator='\t', has_header=True)
 
-    if pgpt_level not in df.columns:
-        valid_levels = [c for c in df.columns if c.startswith("Lv")]
-        raise ValueError(f"PGPT level '{pgpt_level}' not found in database. Available: {valid_levels}")
-    
     # Extract KO using RegEx (KXXXXX at the end of the string)
     df = df.with_columns(
         pl.col('PGPT_ID').str.extract(r"-(K\d{5})$", 1).alias('KO_raw')
@@ -59,8 +77,6 @@ def load_pathways_db(pgpt_level: str) -> pl.DataFrame:
     ).drop('KO_raw')
     
     # Filter null KOs and select final columns
-    # df = df.filter(pl.col('KO').is_not_null()).select(['KO', 'PGPT_ID']).unique()
-
     df = df.filter(
         pl.col('KO').is_not_null() & pl.col(pgpt_level).is_not_null()
     ).select(['KO', pgpt_level]).unique()
@@ -129,30 +145,24 @@ def generate_unstratified_pgpt(
         aggregate_function='sum'
     ).fill_null(0.0)
     
-    # Sort before saving
+    # Sort by pgpt_level before saving
     pgpt_wide = pgpt_wide.sort(pgpt_level)
     
     # 7. Save
     output_path = output_dir / f"unstratified_pgpt_{pgpt_level}_abundances.tsv"
     pgpt_wide.write_csv(output_path, separator='\t')
 
-    try:
-        snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3).sort(pgpt_level).head(3)
-        
-        print("\n--- Output Preview: First 3 rows ---")
-        with pl.Config(
-            set_fmt_str_lengths=25,
-            tbl_width_chars=180,
-            # tbl_rows=3,
-            tbl_cols=4,
-            tbl_hide_dataframe_shape=True,
-            tbl_hide_column_data_types=True
-        ):
-            print(snippet_df)
-    except Exception as e:
-        print(f"  [Warning] Could not display output preview: {e}")
+    # 8. Print out a pretty table in the terminal for the user
+    snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3).sort(pgpt_level).head(3)
     
-    # 7. Save
-    # pgpt_wide.write_csv(output_path, separator='\t')
+    print("\n--- Output Preview: First 3 rows ---")
+    with pl.Config(
+        set_fmt_str_lengths=25,
+        tbl_width_chars=180,
+        tbl_cols=4,
+        tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True
+    ):
+        print(snippet_df)
     
     return output_path

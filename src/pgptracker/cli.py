@@ -136,10 +136,11 @@ def create_parser() -> argparse.ArgumentParser:
     parent_parser = argparse.ArgumentParser(add_help=False)
     parent_parser.add_argument(
         '--profile',
-        choices=['production', 'debug', 'minimal'], # Agora é uma escolha
-        nargs='?', # O '?' torna o argumento opcional
-        const='production', # Se usar só --profile, usa 'production'
-        help='Enable memory profiling with a specific level'
+        choices=['production', 'debug', 'minimal'], 
+        nargs='?', 
+        const='production', 
+        default=None,
+        help='Enable memory profiling (default preset if flag is used: production)'
     )
     
     # Process command (the main pipeline)
