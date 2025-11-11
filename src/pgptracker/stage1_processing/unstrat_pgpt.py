@@ -8,8 +8,9 @@ Author: Vivian Mello
 
 import polars as pl
 from pathlib import Path
+import time
 import importlib.resources
-from pgptracker.utils.profiler import profile_memory
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 
 @profile_memory
@@ -110,6 +111,7 @@ def generate_unstratified_pgpt(
         raise FileNotFoundError(f"Unstratified KO file not found: {unstrat_ko_path}")
     
     output_dir.mkdir(parents=True, exist_ok=True)
+    start_time = time.time()
 
     # 1. Load KOs (KO x Sample)
     df_ko = pl.read_csv(
@@ -152,10 +154,18 @@ def generate_unstratified_pgpt(
     
     # Sort by pgpt_level before saving
     pgpt_wide = pgpt_wide.sort(pgpt_level)
+
+    # 7.Update running totals for the final log message
+    total_rows = pgpt_wide.height
+    total_columns = pgpt_wide.width
     
-    # 7. Save
+    # 8. Save
     output_path = output_dir / f"unstratified_pgpt_{pgpt_level}_abundances.tsv"
     pgpt_wide.write_csv(output_path, separator='\t')
+
+    # Log completion
+    elapsed = time.time() - start_time
+    print(f"  -> Export complete: {total_rows:,} rows × {total_columns} columns processed in: ({elapsed:.1f}s)")
 
     # 8. Print out a pretty table in the terminal for the user
     snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3).sort(pgpt_level).head(3)

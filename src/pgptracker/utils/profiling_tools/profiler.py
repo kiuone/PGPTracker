@@ -16,7 +16,7 @@ from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from datetime import datetime
 import polars as pl
-from pgptracker.utils.profile_config import get_config
+from pgptracker.utils.profiling_tools.profile_config import get_config
 
 
 @dataclass

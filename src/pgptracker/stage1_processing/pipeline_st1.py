@@ -11,22 +11,20 @@ import sys
 import importlib.resources
 import subprocess
 from pathlib import Path
-from pgptracker.utils.validator import validate_inputs, ValidationError
-from pgptracker.qiime.export_module import export_qza_files
-from pgptracker.utils.env_manager import (
-    detect_available_cores, detect_available_memory,
-    get_output_dir, get_threads
-)
-from pgptracker.picrust.place_seqs import build_phylogenetic_tree
-from pgptracker.picrust.hsp_prediction import predict_gene_content
-from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
-from pgptracker.qiime.classify import classify_taxonomy
-from pgptracker.utils.merge import merge_taxonomy_to_table
-from pgptracker.utils.validator import ValidationError
-from pgptracker.analysis.unstratified import (load_pathways_db, 
-                                              generate_unstratified_pgpt)
-from pgptracker.analysis.stratify import generate_stratified_analysis
 
+# Local imports
+from pgptracker.utils.validator import validate_inputs, ValidationError
+from pgptracker.wrappers.qiime.export_module import export_qza_files
+from pgptracker.utils.env_manager import (detect_available_cores, detect_available_memory,
+    get_output_dir, get_threads)
+from pgptracker.wrappers.picrust.place_seqs import build_phylogenetic_tree
+from pgptracker.wrappers.picrust.hsp_prediction import predict_gene_content
+from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
+from pgptracker.wrappers.qiime.classify import classify_taxonomy
+from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table
+from pgptracker.stage1_processing.unstrat_pgpt import (load_pathways_db,
+                                              generate_unstratified_pgpt)
+from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
 def run_pipeline(args: argparse.Namespace) -> int:
     """
     Executes the full process command (Stage 1: ASVs -> PGPTs).
@@ -101,9 +99,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
         return 1
     
     # Normalize abundances (PICRUSt2)
-    print("\nStep 5/9: Normalizing abundances...")
-    print(f" -> Using table: {exported['table']}") # Using the .biom exported
-    print(" -> Running PICRUSt2 metagenome_pipeline.py (Douglas et al., 2020)")
+    print("\nStep 5/9: Normalizing abundances and generating the unstratified table...")
+
     try:
         pipeline_outputs = run_metagenome_pipeline(
             table_path=exported['table'],

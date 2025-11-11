@@ -18,8 +18,8 @@ import io
 import time
 from pathlib import Path
 from typing import Optional, List, Tuple
-from pgptracker.analysis.unstratified import load_pathways_db
-from pgptracker.utils.profiler import profile_memory
+from pgptracker.stage1_processing.unstrat_pgpt import load_pathways_db
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 from pgptracker.utils.validator import find_asv_column
 
 TAXONOMY_COLS = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
@@ -429,7 +429,9 @@ def generate_stratified_analysis(
 
     # Sort the output file
     df_sorted = pl.read_csv(output_path, separator='\t').sort([taxonomic_level, pgpt_level, 'Sample'])
-    df_sorted.write_csv(output_path, separator='\t')
+
+    with gzip.open(output_path, 'wt', compresslevel=3) as f_out:
+        df_sorted.write_csv(f_out, separator='\t')
 
     # Display output preview (first 3 rows, all columns)
     snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3

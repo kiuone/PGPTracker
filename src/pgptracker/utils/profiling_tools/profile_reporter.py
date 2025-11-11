@@ -10,9 +10,9 @@ Author: Vivian Mello
 from pathlib import Path
 from typing import List, Tuple, Any, Sequence
 # Import get_profiling_summary, remove FunctionProfile (not directly used here)
-from pgptracker.utils.profiler import MemoryProfiler, get_profiling_summary, FunctionProfile
+from pgptracker.utils.profiling_tools.profiler import MemoryProfiler, get_profiling_summary, FunctionProfile
 # Only import get_config, as warnings functions will be moved here
-from pgptracker.utils.profile_config import get_config
+from pgptracker.utils.profiling_tools.profile_config import get_config
 
 
 def generate_tsv_report(output_path: Path) -> Path:

@@ -13,16 +13,16 @@ from pathlib import Path
 
 # Local imports
 from pgptracker.utils.validator import ValidationError
-from pgptracker.qiime.export_module import export_qza_files
-from pgptracker.picrust.place_seqs import build_phylogenetic_tree
-from pgptracker.picrust.hsp_prediction import predict_gene_content
-from pgptracker.picrust.metagenome_p2 import run_metagenome_pipeline
-from pgptracker.qiime.classify import classify_taxonomy
-from pgptracker.utils.merge import merge_taxonomy_to_table
+from pgptracker.wrappers.qiime.export_module import export_qza_files
+from pgptracker.wrappers.picrust.place_seqs import build_phylogenetic_tree
+from pgptracker.wrappers.picrust.hsp_prediction import predict_gene_content
+from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
+from pgptracker.wrappers.qiime.classify import classify_taxonomy
+from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table
 from pgptracker.utils.validator import validate_output_file as _validate_output
 from pgptracker.utils.env_manager import get_output_dir, get_threads
-from pgptracker.analysis.unstratified import generate_unstratified_pgpt
-from pgptracker.analysis.stratify import generate_stratified_analysis
+from pgptracker.stage1_processing.unstrat_pgpt import generate_unstratified_pgpt
+from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
 
 # Handler Functions (logic for each subcommand)
 def export_command(args: argparse.Namespace) -> int:

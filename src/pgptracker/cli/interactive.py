@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Optional, Callable, Dict, Tuple
 
 # Import core functions
-from pgptracker.pipeline import run_pipeline
-from pgptracker.subcommands import (
+from pgptracker.stage1_processing.pipeline_st1 import run_pipeline
+from pgptracker.cli.subcommands import (
     export_command,
     place_seqs_command,
     hsp_command,

@@ -14,7 +14,7 @@ from pgptracker.utils.env_manager import run_command
 from pgptracker.utils.validator import ValidationError
 from pgptracker.utils.validator import validate_output_file as _validate_output
 from pgptracker.utils.validator import find_asv_column
-from pgptracker.utils.profiler import profile_memory
+from pgptracker.utils.profiling_tools.profilerimport profile_memory
 
 TAXONOMY_COLS = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
 

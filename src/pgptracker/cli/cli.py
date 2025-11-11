@@ -22,13 +22,15 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
-from pgptracker import pipeline
-from pgptracker import subcommands
-from pgptracker.interactive import run_interactive_mode
-from pgptracker.utils.profiler import MemoryProfiler
-from pgptracker.subcommands import parent_parser
-from pgptracker.utils.profile_config import use_preset, get_config
-from pgptracker.utils.profile_reporter import generate_tsv_report, print_pretty_table
+
+#imports from other scripts
+from pgptracker.stage1_processing import pipeline_st1
+from pgptracker.cli import subcommands
+from pgptracker.cli.interactive import run_interactive_mode
+from pgptracker.utils.profiling_tools.profiler import MemoryProfiler
+from pgptracker.cli.subcommands import parent_parser
+from pgptracker.utils.profiling_tools.profile_config import use_preset, get_config
+from pgptracker.utils.profiling_tools.profile_reporter import generate_tsv_report, print_pretty_table
 from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 
 def setup_command(args: argparse.Namespace) -> int:
@@ -292,7 +294,7 @@ def process_command(args: argparse.Namespace) -> int:
     print("\nPGPTracker - Full Process Pipeline (Stage 1)")
     print()
     
-    exit_code = pipeline.run_pipeline(args)
+    exit_code = pipeline_st1.run_pipeline(args)
     
     return exit_code
 
