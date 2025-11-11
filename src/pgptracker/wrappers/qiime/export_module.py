@@ -6,13 +6,13 @@ using QIIME2 tools export command.
 """
 
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 import shutil
 import subprocess 
 from pgptracker.utils.env_manager import run_command
 
 
-def export_qza_files(inputs: Dict[str, any], output_dir: Path) -> Dict[str, Path]:
+def export_qza_files(inputs: Dict[str, Any], output_dir: Path) -> Dict[str, Path]:
     """
     Exports .qza files to .fna and .biom formats if needed.
     

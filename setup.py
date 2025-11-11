@@ -54,7 +54,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "pgptracker=pgptracker.cli:main",
+            "pgptracker=pgptracker.cli.cli:main",
         ],
     },
     package_data={

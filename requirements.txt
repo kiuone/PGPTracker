@@ -11,6 +11,7 @@ bioservices
 scipy
 scikit-learn
 statsmodels
+scikit-bio
 
 # Visualization
 matplotlib

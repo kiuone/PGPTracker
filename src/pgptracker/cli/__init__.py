@@ -1,0 +1,1 @@
+from pgptracker.cli.cli import main
