@@ -135,8 +135,7 @@ def run_pipeline(args: argparse.Namespace) -> int:
             seqtab_norm_gz=pipeline_outputs['seqtab_norm'],
             taxonomy_tsv=taxonomy_path,
             output_dir=inputs['output'], # Save in /output/
-            save_intermediates=args.save_intermediates
-        )
+            )
     except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[MERGE ERROR] Table merging failed: {e}", file=sys.stderr)
         return 1

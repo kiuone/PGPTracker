@@ -3,7 +3,7 @@ from polars.testing import assert_frame_equal
 
 # Carregue os dois outputs
 df_original_pandas = pl.read_csv("results/test_run_fna2/picrust2_intermediates/KO_metagenome_out/pred_metagenome_unstrat.tsv.gz", separator='\t')
-df_novo_polars = pl.read_csv("test_run_new_unstrat/KO_metagenome_out/pred_metagenome_unstrat.tsv.gz", separator='\t')
+df_novo_polars = pl.read_csv("results/test_run_new_unstrat/KO_metagenome_out/pred_metagenome_unstrat.tsv.gz", separator='\t')
 
 # O 'function' pode ser o índice
 df_original_pandas = df_original_pandas.sort("function")
@@ -37,7 +37,7 @@ except AssertionError as e:
 
 # Carregue os dois outputs
 df_original_seqtab_norm = pl.read_csv("results/test_run_fna2/picrust2_intermediates/KO_metagenome_out/seqtab_norm.tsv.gz", separator='\t')
-df_novo_seqtab_norm = pl.read_csv("test_run_new_unstrat/KO_metagenome_out/seqtab_norm.tsv.gz", separator='\t')
+df_novo_seqtab_norm = pl.read_csv("results/test_run_new_unstrat/KO_metagenome_out/seqtab_norm.tsv.gz", separator='\t')
 
 # O 'normalized' pode ser o índice
 df_original_seqtab_norm = df_original_seqtab_norm.sort("normalized")

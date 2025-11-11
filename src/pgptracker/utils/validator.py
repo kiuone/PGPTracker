@@ -154,7 +154,8 @@ def validate_inputs(
 
 def find_asv_column(df):
     ASV_ID_CANDIDATES = ['OTU/ASV_ID', 'ASV_ID', 'OTU_ID', '#OTU ID', 'sequence']
-    asv_col = next((c for c in ASV_ID_CANDIDATES if c in df.columns), None)
+    df_cols = df.collect_schema().names()
+    asv_col = next((c for c in ASV_ID_CANDIDATES if c in df_cols), None)
     if asv_col is None:
         raise ValueError(f"ASV column not found. Expected: {ASV_ID_CANDIDATES}")
     return asv_col

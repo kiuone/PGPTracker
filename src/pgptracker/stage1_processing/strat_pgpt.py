@@ -276,64 +276,61 @@ def join_and_calculate_batched(
     total_rows = 0
     total_columns = 0
     
-    # Write results incrementally to compressed file
-    with gzip.open(output_path, 'wb', compresslevel=3) as f_gzip:
-        # Iterate above the groups (ex: ('Pseudomonas', df_pseudomonas), ('Bacillus', df_bacillus))
-        with io.TextIOWrapper(f_gzip, encoding="utf-8") as f_text:
+    # Write results incrementally to UNCOMPRESSED file (changed from gzip)
+    with open(output_path, 'w', encoding='utf-8') as f_text:
                 
-            # NOTE: group_by() always returns (key_tuple, df) where key_tuple is ALWAYS a tuple
-            for i, (current_taxon_tuple, ko_pgpt_batch_df) in enumerate(ko_pgpt_groups):
+        # NOTE: group_by() always returns (key_tuple, df) where key_tuple is ALWAYS a tuple
+        for i, (current_taxon_tuple, ko_pgpt_batch_df) in enumerate(ko_pgpt_groups):
                 
-                # Extract the scalar value from the tuple (e.g., ('GenusA',) -> 'GenusA')
-                current_taxon = current_taxon_tuple[0] # Now ['GenusA'] correctly
+            # Extract the scalar value from the tuple (e.g., ('GenusA',) -> 'GenusA')
+            current_taxon = current_taxon_tuple[0] # Now ['GenusA'] correctly
                 
-                # print(f"-> Processing Group {i + 1}/{n_groups} ({current_taxon})", flush=True)
+            # print(f"-> Processing Group {i + 1}/{n_groups} ({current_taxon})", flush=True)
         
-                # Filter abundance data for this taxon
-                if current_taxon is None:
-                # Use .is_null() when the taxon group is None
-                    abun_batch = tax_abun.filter(pl.col(tax_level).is_null())
-                else:
-                # Use normal equality check for named taxa
-                    abun_batch = tax_abun.filter(pl.col(tax_level) == current_taxon)
+            # Filter abundance data for this taxon
+            if current_taxon is None:
+            # Use .is_null() when the taxon group is None
+                abun_batch = tax_abun.filter(pl.col(tax_level).is_null())
+            else:
+            # Use normal equality check for named taxa
+                abun_batch = tax_abun.filter(pl.col(tax_level) == current_taxon)
 
-                joined = abun_batch.join(ko_pgpt_batch_df, on=tax_level, how='inner', nulls_equal=True)
+            joined = abun_batch.join(ko_pgpt_batch_df, on=tax_level, how='inner', nulls_equal=True)
                 
-                # Calculate functional abundance
-                joined = joined.with_columns(
-                    (pl.col('Total_Tax_Abundance') * pl.col('Avg_Copy_Number')).alias('Functional_Abundance')
-                )
+            # Calculate functional abundance
+            joined = joined.with_columns(
+                (pl.col('Total_Tax_Abundance') * pl.col('Avg_Copy_Number')).alias('Functional_Abundance')
+            )
                 
-                # Aggregate to final format: (Taxon x PGPT x Sample)
-                result = joined.group_by([tax_level, pgpt_level, 'Sample']).agg(
-                    pl.col('Functional_Abundance').sum().alias('Total_PGPT_Abundance')
-                )
+            # Aggregate to final format: (Taxon x PGPT x Sample)
+            result = joined.group_by([tax_level, pgpt_level, 'Sample']).agg(
+                pl.col('Functional_Abundance').sum().alias('Total_PGPT_Abundance')
+            )
 
-                # Process only if this batch (taxon) yielded results
-                if not result.is_empty():
-                    # 1. Write to an in-memory buffer (StringIO) first, because if not
-                    # polars can't read the zipped file for some reason
-                    string_buffer = io.StringIO()
-                    result.write_csv(string_buffer, separator='\t', include_header=first_batch)
+            # Process only if this batch (taxon) yielded results
+            if not result.is_empty():
+                # 1. Write to an in-memory buffer (StringIO) first
+                string_buffer = io.StringIO()
+                result.write_csv(string_buffer, separator='\t', include_header=first_batch)
                     
-                    # 2. Get the string from the buffer and write to the gzipped file
-                    csv_string = string_buffer.getvalue()
-                    f_text.write(csv_string)
-                    f_text.flush()  # Force flush to ensure data is written
+                # 2. Get the string from the buffer and write to the file
+                csv_string = string_buffer.getvalue()
+                f_text.write(csv_string)
+                f_text.flush()  # Force flush to ensure data is written
                     
-                    # 3. Toggle the header flag off after the first pass
-                    if first_batch:
-                        first_batch = False
+                # 3. Toggle the header flag off after the first pass
+                if first_batch:
+                    first_batch = False
 
-                    # 4. Update running totals for the final log message
-                    total_rows += len(result)
-                    if total_columns == 0:
-                        total_columns = len(result.columns)
+                # 4. Update running totals for the final log message
+                total_rows += len(result)
+                if total_columns == 0:
+                    total_columns = len(result.columns)
 
                 
-                # Cleanup memory
-                del abun_batch, ko_pgpt_batch_df, joined, result
-                gc.collect()
+            # Cleanup memory
+            del abun_batch, ko_pgpt_batch_df, joined, result
+            gc.collect()
 
     # Adds a verification in the case no data has been written
     if total_rows == 0:
@@ -390,7 +387,7 @@ def generate_stratified_analysis(
             Pseudomonas   nitrogen_fixing  Sample_A  50.0
     """
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{taxonomic_level.lower()}_stratified_pgpt.tsv.gz"
+    output_path = output_dir / f"{taxonomic_level.lower()}_stratified_pgpt.tsv"  # Changed to .tsv (no .gz)
     
     print(f"\n  Starting stratified analysis for selected level: '{taxonomic_level}'")
     
@@ -402,7 +399,8 @@ def generate_stratified_analysis(
     sample_cols = identify_sample_columns(ftable, sample_prefix, exclude_cols)
 
     # 3. Load ko predictions per ASV ('KO_predicted.tsv.gz') 
-    ko_df = pl.read_csv(ko_predicted_path, separator='\t', has_header=True,)
+    with gzip.open(ko_predicted_path, 'rb') as f:
+        ko_df = pl.read_csv(f, separator='\t', has_header=True)
     # Drop metadata from KO_predicted.tsv.gz
     cols_to_drop = [c for c in ko_df.columns if c.startswith('metadata_') or c == 'closest_reference_genome']
     ko_df = ko_df.drop(cols_to_drop)
@@ -430,8 +428,8 @@ def generate_stratified_analysis(
     # Sort the output file
     df_sorted = pl.read_csv(output_path, separator='\t').sort([taxonomic_level, pgpt_level, 'Sample'])
 
-    with gzip.open(output_path, 'wt', compresslevel=3) as f_out:
-        df_sorted.write_csv(f_out, separator='\t')
+    # Rewrite the sorted version (overwrites the original)
+    df_sorted.write_csv(output_path, separator='\t')
 
     # Display output preview (first 3 rows, all columns)
     snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3

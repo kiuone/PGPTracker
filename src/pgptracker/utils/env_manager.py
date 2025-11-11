@@ -180,38 +180,33 @@ def get_threads(args_threads: Optional[int]) -> int:
     """
     return args_threads or detect_available_cores()
 
-# def get_system_resources() -> Dict[str, any]:
-#     """
-#     Gets available system resources.
+def detect_gpu() -> tuple[bool, str]:
+    """
+    Detect GPU availability for TensorFlow/TensorLy.
     
-#     Returns:
-#         dict: Dictionary with 'cores' and 'memory_gb' keys.
-#     """
-#     return {
-#         'cores': detect_available_cores(),
-#         'memory_gb': detect_available_memory()
-#     }
-
-# def print_system_info() -> None:
-#     """
-#     Prints system information including available resources.
-#     """
-#     resources = get_system_resources()
+    Returns:
+        (has_gpu, backend_name)
+        Backends: 'cuda' (NVIDIA), 'mps' (Apple Metal), 'cpu'
     
-#     print("System Resources:")
-#     print(f"  CPU Cores: {resources['cores']}")
+    Example:
+        has_gpu, backend = detect_gpu()
+        if has_gpu:
+            print(f"Using GPU backend: {backend}")
+    """
+    try:
+        import torch
+        if torch.cuda.is_available():
+            return (True, 'cuda')
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return (True, 'mps')
+    except ImportError:
+        pass
     
-#     if resources['memory_gb'] > 0:
-#         print(f"  Memory: {resources['memory_gb']} GB")
-#     else:
-#         print("  Memory: Unable to detect")
+    try:
+        import tensorflow as tf
+        if tf.config.list_physical_devices('GPU'):
+            return (True, 'cuda')
+    except ImportError:
+        pass
     
-#     print()
-#     print("Checking conda environments...")
-    
-#     for tool, env_name in ENV_MAP.items():
-#         exists = check_environment_exists(env_name)
-#         status = "✓" if exists else "✗"
-#         print(f"  {status} {env_name}")
-    
-#     print()
+    return (False, 'cpu')

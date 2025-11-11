@@ -126,13 +126,13 @@ def merge_taxonomy_to_table(
     processed_lazy = _process_taxonomy_polars(df_joined)
 
     # Step 5: Collect (stream) and write final TSV
-    processed_lazy.sort([TAXONOMY_COLS], nulls_last=True).collect(engine="streaming").write_csv(
+    processed_lazy.sort(TAXONOMY_COLS, nulls_last=True).collect(engine="streaming").write_csv(
         final_processed_tsv, separator='\t')
     
     _validate_output(final_processed_tsv, "Polars Merge", "final processed table")
 
     # Step 6: Print Snippets
-    cols = processed_lazy.sort([TAXONOMY_COLS], nulls_last=True).collect_schema().names()[:9]
+    cols = processed_lazy.sort(TAXONOMY_COLS, nulls_last=True).collect_schema().names()[:9]
     snippet_df = pl.read_csv(
         final_processed_tsv,
         separator='\t',
