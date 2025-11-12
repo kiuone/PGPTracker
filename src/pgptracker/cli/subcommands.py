@@ -10,6 +10,7 @@ import sys
 import importlib.resources
 import subprocess
 from pathlib import Path
+import polars as pl
 
 # Local imports
 from pgptracker.utils.validator import ValidationError
@@ -23,6 +24,7 @@ from pgptracker.utils.validator import validate_output_file as _validate_output
 from pgptracker.utils.env_manager import get_output_dir, get_threads
 from pgptracker.stage1_processing.unstrat_pgpt import generate_unstratified_pgpt
 from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
+from pgptracker.stage2_analysis.clr_normalize import apply_clr
 
 # Handler Functions (logic for each subcommand)
 def export_command(args: argparse.Namespace) -> int:
@@ -237,6 +239,47 @@ def stratify_pgpt_command(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[STRATIFY ERROR] Analysis failed: {e}", file=sys.stderr)
         return 1
+
+# BEGGINGING OF STAGE 2 SUBCOMMANDS
+
+def clr_command(args: argparse.Namespace) -> int:
+    """Handler for the 'clr' subcommand (Stage 2)."""
+    try:
+        # 1. Get paths
+        input_path = Path(args.input)
+        _validate_output(input_path, "clr", "input abundance table")
+
+        output_dir = get_output_dir(args.output)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        print("Running CLR Transformation...")
+        print(f"  -> Input table: {input_path}")
+        print(f"  -> Format: {args.format}")
+        print(f"  -> Output directory: {output_dir}")
+
+        # 2. Load dataframe
+        df = pl.read_csv(input_path, separator='\t', has_header=True)
+
+        # 3. Call the CLR function
+        clr_outputs = apply_clr(
+            df,
+            format=args.format,
+            sample_col=args.sample_col,
+            value_col=args.value_col
+        )
+
+        # 4. Save all resulting dataframes
+        print("\nCLR transformation successful. Saving outputs:")
+        for key, df_out in clr_outputs.items():
+            output_file = output_dir / f"{key}.tsv"
+            df_out.write_csv(output_file, separator='\t')
+            print(f"  -> Saved: {output_file.name}")
+        
+        return 0
+
+    except (FileNotFoundError, ValueError, RuntimeError) as e:
+        print(f"\n[CLR ERROR] CLR transformation failed: {e}", file=sys.stderr)
+        return 1
     
 parent_parser = argparse.ArgumentParser(add_help=False)
 parent_parser.add_argument(
@@ -390,3 +433,39 @@ def register_stratify_pgpt_command(subparsers: argparse._SubParsersAction):
         help="Output directory (default: results/run_DD-MM-YYYY)")
     
     stratify_parser.set_defaults(func=stratify_pgpt_command)
+
+# BEGGINGING OF STAGE 2 REGISTRATION
+
+def register_clr_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'clr' subcommand (Stage 2)."""
+    
+    clr_parser = subparsers.add_parser(
+        "clr",
+        parents=[parent_parser],
+        help="Step 10 (Stage 2): Apply CLR transformation to an abundance table",
+        description="Applies Centered Log-Ratio (CLR) transformation to a wide "
+                    "or long format abundance table. Handles zeros via "
+                    "multiplicative replacement.")
+    
+    # Input/Output
+    io_group = clr_parser.add_argument_group("input/output files")
+    io_group.add_argument("-i", "--input", type=str, required=True, metavar="PATH",
+        help="Path to the input abundance table (must be .tsv)")
+    io_group.add_argument("-o", "--output", type=str, required=True, metavar="PATH",
+        help="Output directory to save the transformed table(s)")
+    
+    # Parameters
+    params_group = clr_parser.add_argument_group("transformation parameters")
+    params_group.add_argument("--format", type=str, required=True,
+        choices=['wide', 'long'],
+        help="Format of the input table ('wide' or 'long')")
+    
+    params_group.add_argument("--sample-col", type=str, default="Sample",
+        metavar="NAME",
+        help="Name of the sample column (for 'long' format) (default: %(default)s)")
+    
+    params_group.add_argument("--value-col", type=str, default="Total_PGPT_Abundance",
+        metavar="NAME",
+        help="Name of the abundance/value column (for 'long' format) (default: %(default)s)")
+    
+    clr_parser.set_defaults(func=clr_command)

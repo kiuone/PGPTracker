@@ -2,6 +2,33 @@ from skbio.stats.composition import clr, multi_replace
 import polars as pl
 import numpy as np
 from typing import Dict, Tuple
+import sys
+
+# --- [DEBUG] Helper Function ---
+def print_df_head(df: pl.DataFrame, name: str):
+    """Helper function to print the head (4 rows) and first 7 columns, plus shape."""
+    if df is None:
+        print(f"\n--- [DEBUG] DataFrame: {name} is None ---")
+        return
+    
+    print(f"\n--- [DEBUG] DataFrame: {name} (Original Shape: {df.shape}) ---")
+    
+    df_head = df.head(4)
+    
+    # select the first 7 columns 
+    num_cols_to_show = min(7, len(df.columns))
+    df_subset = df_head.select(df.columns[:num_cols_to_show])
+    
+    with pl.Config(tbl_width_chars=200, tbl_cols=-1, tbl_rows=4):
+        print(df_subset)
+        
+    if len(df.columns) > 7:
+        print(f"    ... (showing 7 of {len(df.columns)} total columns)")
+        
+    print(f"--- [DEBUG] End of DataFrame: {name} ---")
+    sys.stdout.flush() # Grants the print appears before potential errors/logs
+# --- [DEBUG] End Helper Function ---
+
 
 def apply_clr(
     df: pl.DataFrame, 
@@ -15,7 +42,7 @@ def apply_clr(
 
     - 'wide' format: Returns {'unstratified_clr': df_wide_clr}
     - 'long' format: Returns {'stratified_wide_clr': df_wide_clr,
-                            'stratified_long_clr': df_long_clr}
+                              'stratified_long_clr': df_long_clr}
     
     This allows the CLI to save the 'stratified_wide_clr' output
     while using the 'stratified_long_clr' for other steps.
@@ -29,20 +56,27 @@ def apply_clr(
         format: Table format. Must be one of ['wide', 'unstratified', 
                 'long', 'stratified']. 
         sample_col (str): Name of the sample column (for 'long' format).
-                    Defaults to "Sample".
+                          Defaults to "Sample".
         value_col (str): Name of the abundance/value column (for 'long' format).
-                    Defaults to "Total_PGPT_Abundance".
+                         Defaults to "Total_PGPT_Abundance".
 
     Returns:
         A dictionary mapping output names to CLR-transformed DataFrames.
     """
+    print_df_head(df, f"df (input to apply_clr, format='{format}')")
+    
     if format in ('wide', 'unstratified'):
         df_wide_clr = _clr_wide(df)
+        print_df_head(df_wide_clr, "df_wide_clr (returned by _clr_wide)")
         return {'unstratified_clr': df_wide_clr}
     
     elif format in ('long', 'stratified'):
         # _clr_long now returns both wide and long versions
         df_wide_clr, df_long_clr = _clr_long(df, sample_col, value_col)
+        
+        print_df_head(df_wide_clr, "df_wide_clr (returned by _clr_long)")
+        print_df_head(df_long_clr, "df_long_clr (returned by _clr_long)")
+        
         return {
             'stratified_wide_clr': df_wide_clr,
             'stratified_long_clr': df_long_clr
@@ -65,20 +99,20 @@ def _clr_long(
     
     Returns a tuple containing: (df_wide_clr, df_long_clr)
 
-   - Pivots long data to wide creating zeros from missing values.
-   - Calls _clr_wide() to perform the transformation (which handles zeros).
-   - Unpivots data back to long format with 'CLR_Abundance' column.
+    - Pivots long data to wide creating zeros from missing values.
+    - Calls _clr_wide() to perform the transformation (which handles zeros).
+    - Unpivots data back to long format with 'CLR_Abundance' column.
     
-     Example (LONG):
+      Example (LONG):
         Input:
-            Order    Lv3                Sample           Total_PGPT_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         25.0
-            Bacilli  PHOSPHATE_SOL      Sample_A         15.0
+            Order    Lv3                Sample        Total_PGPT_Abundance
+            Bacilli  NITROGEN_FIXATION  Sample_A      25.0
+            Bacilli  PHOSPHATE_SOL      Sample_A      15.0
         
         Output:
-            Order    Lv3                Sample           CLR_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         0.223144
-            Bacilli  PHOSPHATE_SOL      Sample_A        -0.223144
+            Order    Lv3                Sample        CLR_Abundance
+            Bacilli  NITROGEN_FIXATION  Sample_A      0.223144
+            Bacilli  PHOSPHATE_SOL      Sample_A     -0.223144
     """
     # 1. Identify all feature/taxonomy columns
     non_abundance_cols = [
@@ -91,10 +125,12 @@ def _clr_long(
         index=non_abundance_cols,
         on=sample_col
     ).fill_null(0.0)
+    print_df_head(df_wide, "df_wide (after pivot in _clr_long)")
     
     # 3. Apply CLR (delegated to _clr_wide)
     # This IS the 'stratified_wide_clr' output
     df_wide_clr = _clr_wide(df_wide)
+    print_df_head(df_wide_clr, "df_wide_clr (returned from _clr_wide in _clr_long)")
     
     # 4. Identify sample columns that were created by the pivot
     sample_cols_in_wide = [
@@ -111,6 +147,7 @@ def _clr_long(
         variable_name=sample_col, 
         value_name=new_value_name
     )
+    print_df_head(df_long_clr, "df_long_clr (after unpivot in _clr_long)")
     
     # 7. Return BOTH dataframes
     return df_wide_clr, df_long_clr
@@ -126,14 +163,14 @@ def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
     - Applies multi_replace and clr on valid samples.
     - Transposes (N, D) -> (D, N) and reconstructs DataFrame.
 
-     Example (WIDE):
+      Example (WIDE):
         Input:
-            PGPT_ID           Sample_A  Sample_B
-            NITROGEN_FIXATION 10        5
-            PHOSPHATE_SOL     15        20
+            PGPT_ID            Sample_A  Sample_B
+            NITROGEN_FIXATION  10        5
+            PHOSPHATE_SOL      15        20
         
         Output:
-            PGPT_ID           Sample_A   Sample_B
+            PGPT_ID            Sample_A   Sample_B
             NITROGEN_FIXATION -0.223144  -0.693147
             PHOSPHATE_SOL      0.223144   0.693147
     """
@@ -182,11 +219,15 @@ def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
                 clr_matrix_T[valid_rows_mask] = valid_clr_matrix_T
 
     # 9. Transpose back to (D, N) to match original df structure
-    clr_matrix = clr_matrix_T.T
+    # clr_matrix = clr_matrix_T.T # This variable is not used
 
     # Reconstruct using a dictionary to explicitly map sample names
     # to the correct data columns (which are the rows of clr_matrix_T)
     clr_df = pl.DataFrame(
         dict(zip(sample_cols, clr_matrix_T)))
+    print_df_head(clr_df, "clr_df (reconstructed from numpy in _clr_wide)")
     
-    return pl.concat([df.select(feature_cols), clr_df], how='horizontal')
+    final_df = pl.concat([df.select(feature_cols), clr_df], how='horizontal')
+    print_df_head(final_df, "final_df (concatenated in _clr_wide)")
+    
+    return final_df

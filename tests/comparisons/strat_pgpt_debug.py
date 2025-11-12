@@ -16,6 +16,7 @@ import gzip
 import gc
 import io
 import time
+import sys
 from pathlib import Path
 from typing import Optional, List, Tuple
 from pgptracker.stage1_processing.unstrat_pgpt import load_pathways_db
@@ -23,6 +24,32 @@ from pgptracker.utils.profiling_tools.profiler import profile_memory
 from pgptracker.utils.validator import find_asv_column
 
 TAXONOMY_COLS = ['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species']
+
+# --- [DEBUG] Helper Function ---
+def print_df_head(df: pl.DataFrame, name: str):
+    """Helper function to print the head (4 rows) and first 7 columns, plus shape."""
+    if df is None:
+        print(f"\n--- [DEBUG] DataFrame: {name} is None ---")
+        return
+    
+    print(f"\n--- [DEBUG] DataFrame: {name} (Original Shape: {df.shape}) ---")
+    
+    df_head = df.head(4)
+    
+    # select the first 7 columns 
+    num_cols_to_show = min(7, len(df.columns))
+    df_subset = df_head.select(df.columns[:num_cols_to_show])
+    
+    with pl.Config(tbl_width_chars=200, tbl_cols=-1, tbl_rows=4):
+        print(df_subset)
+        
+    if len(df.columns) > 7:
+        print(f"    ... (showing 7 of {len(df.columns)} total columns)")
+        
+    print(f"--- [DEBUG] End of DataFrame: {name} ---")
+    sys.stdout.flush() # Grants the print appears before potential errors/logs
+# --- [DEBUG] End Helper Function ---
+
 
 def identify_sample_columns(
     ftable: pl.DataFrame,
@@ -125,14 +152,17 @@ def aggregate_by_tax_level_sample(
         variable_name='Sample',
         value_name='Abundance'
     )
+    print_df_head(ftable_long, "ftable_long (after unpivot)")
     
     # Filter out zeros (reduce data volume)
     ftable_long = ftable_long.filter(pl.col('Abundance') > 0)
+    print_df_head(ftable_long, "ftable_long (after filter > 0)")
     
     # Aggregate: Sum by tax_level and sample
     tax_abun = ftable_long.group_by([tax_level, 'Sample']).agg(
         pl.col('Abundance').sum().alias('Total_Tax_Abundance')
     )
+    print_df_head(tax_abun, "tax_abun (after group_by)")
 
     # Polars see 'Null' as a tax_level type
     # Pseudomonas, Null and Bacillus would all be in 'Genus', for example.
@@ -140,9 +170,11 @@ def aggregate_by_tax_level_sample(
         # If True: Rename Nulls to 'unclassified_...'
         tax_abun = tax_abun.with_columns(
             pl.col(tax_level).fill_null(f'Unclassified_{tax_level}'))
+        print_df_head(tax_abun, "tax_abun (after fill_null)")
     else:
         # If False (default): Delete Nulls.
         tax_abun = tax_abun.filter(pl.col(tax_level).is_not_null())
+        print_df_head(tax_abun, "tax_abun (after filter_not_null)")
     
     print(f"  -> Step 1 Result: {len(tax_abun)} '{tax_level}'-Sample pairs")
     return tax_abun
@@ -181,16 +213,17 @@ def aggregate_by_tax_level_ko(
             ASV_003     Bacillus
         
         Output (tax_level='Genus'):
-            OTU/ASV_ID      Genus         KO         Avg_Copy_Number
-            ASV_001         Pseudomonas   ko:K00001  2.0
-            ASV_002         Pseudomonas   ko:K00002  1.0
-            ASV_003         Bacillus      ko:K00002  3.0
+            OTU/ASV_ID     Genus         KO         Avg_Copy_Number
+            ASV_001        Pseudomonas   ko:K00001  2.0
+            ASV_002        Pseudomonas   ko:K00002  1.0
+            ASV_003        Bacillus      ko:K00002  3.0
     """
     asv_col_tax = find_asv_column(tax_abun)
     asv_col_ko = find_asv_column(ko_predicted)
     
     # 1. Get taxonomy map (ASV_ID -> tax_level)
     tax_map = tax_abun.select([asv_col_tax, tax_level]).unique()
+    print_df_head(tax_map, "tax_map (from tax_abun.select.unique)")
     
     # Get KO columns
     ko_cols = [c for c in ko_predicted.columns if c.startswith('ko:')]
@@ -202,18 +235,22 @@ def aggregate_by_tax_level_ko(
         variable_name='KO',
         value_name='Copy_Number'
     )
+    print_df_head(ko_long, "ko_long (after ko_predicted.unpivot)")
     
     # Filter out zeros
     ko_long = ko_long.filter(pl.col('Copy_Number') > 0)
+    print_df_head(ko_long, "ko_long (after filter > 0)")
     
     # 3. Join with taxonomy map
     ko_with_tax = ko_long.join(tax_map, left_on=asv_col_ko,
-                               right_on=asv_col_tax, how='inner')
+                                right_on=asv_col_tax, how='inner')
+    print_df_head(ko_with_tax, "ko_with_tax (ko_long JOIN tax_map)")
     
     # 4.Aggregate: Mean copy number by (Taxon, KO)
     tax_ko = ko_with_tax.group_by([tax_level, 'KO']).agg(
         pl.col('Copy_Number').mean().alias('Avg_Copy_Number')
     )
+    print_df_head(tax_ko, "tax_ko (after group_by)")
 
     print(f"  -> Step 2 Result: {len(tax_ko)} '{tax_level}'-KO pairs")
     return tax_ko
@@ -234,9 +271,9 @@ def join_and_calculate_batched(
     
     This is Step 3 of the stratified approach:
     1. For each taxon (e.g., each Genus):
-       - Join small abundance table with small KO table
-       - Calculate functional abundance = Abundance × Copy_Number
-       - Map KOs to PGPTs and aggregate
+        - Join small abundance table with small KO table
+        - Calculate functional abundance = Abundance × Copy_Number
+        - Map KOs to PGPTs and aggregate
     2. Write results incrementally to compressed output
     
     Args:
@@ -260,14 +297,15 @@ def join_and_calculate_batched(
             Pseudomonas   ko:K00001  2.0
         
         After join and KO->PGPT mapping:
-            Genus         Pathway          Sample    Total_PGPT_Abundance
-            Pseudomonas   nitrogen_fixing  Sample_A  50.0
+            Genus         Pathway           Sample    Total_PGPT_Abundance
+            Pseudomonas   nitrogen_fixing   Sample_A  50.0
     """
     start_time = time.time()
     
     # Pre-join: Map KOs to PGPTs (small operation)
     # This creates (Taxon × KO × PGPT) mapping
     ko_pgpt_map = tax_ko.join(pathways, on='KO', how='inner')
+    print_df_head(ko_pgpt_map, "ko_pgpt_map (tax_ko JOIN pathways)")
     
     # Group by taxon (creates iterator over groups)
     ko_pgpt_groups = ko_pgpt_map.group_by(tax_level, maintain_order=True)
@@ -278,13 +316,13 @@ def join_and_calculate_batched(
     
     # Write results incrementally to UNCOMPRESSED file (changed from gzip)
     with open(output_path, 'w', encoding='utf-8') as f_text:
-                
+            
         # NOTE: group_by() always returns (key_tuple, df) where key_tuple is ALWAYS a tuple
         for i, (current_taxon_tuple, ko_pgpt_batch_df) in enumerate(ko_pgpt_groups):
                 
             # Extract the scalar value from the tuple (e.g., ('GenusA',) -> 'GenusA')
             current_taxon = current_taxon_tuple[0] # Now ['GenusA'] correctly
-                
+                    
             # print(f"-> Processing Group {i + 1}/{n_groups} ({current_taxon})", flush=True)
         
             # Filter abundance data for this taxon
@@ -294,30 +332,46 @@ def join_and_calculate_batched(
             else:
             # Use normal equality check for named taxa
                 abun_batch = tax_abun.filter(pl.col(tax_level) == current_taxon)
+            
+            # [DEBUG] Print for first iteration only
+            if i == 0:
+                print_df_head(abun_batch, f"abun_batch (iter 0, taxon: {current_taxon})")
 
             joined = abun_batch.join(ko_pgpt_batch_df, on=tax_level, how='inner', nulls_equal=True)
-                
+            
+            # [DEBUG] Print for first iteration only
+            if i == 0:
+                print_df_head(joined, f"joined (iter 0, taxon: {current_taxon})")
+                    
             # Calculate functional abundance
             joined = joined.with_columns(
                 (pl.col('Total_Tax_Abundance') * pl.col('Avg_Copy_Number')).alias('Functional_Abundance')
             )
-                
+            
+            # [DEBUG] Print for first iteration only
+            if i == 0:
+                print_df_head(joined, f"joined (with Functional_Abundance, iter 0)")
+                    
             # Aggregate to final format: (Taxon x PGPT x Sample)
             result = joined.group_by([tax_level, pgpt_level, 'Sample']).agg(
                 pl.col('Functional_Abundance').sum().alias('Total_PGPT_Abundance')
             )
+            
+            # [DEBUG] Print for first iteration only
+            if i == 0:
+                print_df_head(result, f"result (final agg, iter 0)")
 
             # Process only if this batch (taxon) yielded results
             if not result.is_empty():
                 # 1. Write to an in-memory buffer (StringIO) first
                 string_buffer = io.StringIO()
                 result.write_csv(string_buffer, separator='\t', include_header=first_batch)
-                    
+                        
                 # 2. Get the string from the buffer and write to the file
                 csv_string = string_buffer.getvalue()
                 f_text.write(csv_string)
                 f_text.flush()  # Force flush to ensure data is written
-                    
+                        
                 # 3. Toggle the header flag off after the first pass
                 if first_batch:
                     first_batch = False
@@ -327,7 +381,7 @@ def join_and_calculate_batched(
                 if total_columns == 0:
                     total_columns = len(result.columns)
 
-                
+                    
             # Cleanup memory
             del abun_batch, ko_pgpt_batch_df, joined, result
             gc.collect()
@@ -383,8 +437,8 @@ def generate_stratified_analysis(
             ASV_001     Pseudomonas   10        5
         
         Output stratified profile:
-            Genus         Pathway          Sample    Total_PGPT_Abundance
-            Pseudomonas   nitrogen_fixing  Sample_A  50.0
+            Genus         Pathway           Sample    Total_PGPT_Abundance
+            Pseudomonas   nitrogen_fixing   Sample_A  50.0
     """
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{taxonomic_level.lower()}_stratified_pgpt.tsv"  # Changed to .tsv (no .gz)
@@ -394,6 +448,7 @@ def generate_stratified_analysis(
     # 1. Load data
     # Load feature table normalized with taxonomy (norm_wt_feature_table.tsv)
     ftable = pl.read_csv(merged_table_path, separator='\t', has_header=True, comment_prefix='#')
+    print_df_head(ftable, "ftable (loaded)")
 
     # 2. Identify sample columns 
     sample_cols = identify_sample_columns(ftable, sample_prefix, exclude_cols)
@@ -402,16 +457,23 @@ def generate_stratified_analysis(
     with gzip.open(ko_predicted_path, 'rb') as f:
         content = f.read()
     ko_df = pl.read_csv(content, separator='\t', has_header=True)
+    print_df_head(ko_df, "ko_df (loaded)")
+    
     # Drop metadata from KO_predicted.tsv.gz
     cols_to_drop = [c for c in ko_df.columns if c.startswith('metadata_') or c == 'closest_reference_genome']
     ko_df = ko_df.drop(cols_to_drop)
+    print_df_head(ko_df, "ko_df (after metadata drop)")
 
     # 4. Load PLaBAse that constains the pathways to link KO -> PGPT 
     pathways = load_pathways_db(pgpt_level=pgpt_level) # Uses the imported function from unstratified.py
+    print_df_head(pathways, "pathways (loaded)")
     
     # 5. Aggregate (Reduce data BEFORE join)
     tax_abun = aggregate_by_tax_level_sample(ftable, taxonomic_level, sample_cols, keep_unclassified)
+    print_df_head(tax_abun, "tax_abun (returned from aggregate_by_tax_level_sample)")
+    
     tax_ko = aggregate_by_tax_level_ko(ko_df, ftable, taxonomic_level)
+    print_df_head(tax_ko, "tax_ko (returned from aggregate_by_tax_level_ko)")
     
     # Clean up large dataframes
     del ftable, ko_df
@@ -428,6 +490,7 @@ def generate_stratified_analysis(
 
     # Sort the output file
     df_sorted = pl.read_csv(output_path, separator='\t').sort([taxonomic_level, pgpt_level, 'Sample'])
+    print_df_head(df_sorted, "df_sorted (after reading/sorting result)")
 
     # Rewrite the sorted version (overwrites the original)
     df_sorted.write_csv(output_path, separator='\t')
@@ -435,6 +498,13 @@ def generate_stratified_analysis(
     # Display output preview (first 3 rows, all columns)
     snippet_df = pl.read_csv(output_path, separator='\t', n_rows=3
         ).sort([taxonomic_level, pgpt_level, 'Sample']).head(3)
+    
+    # [DEBUG] Using the helper for consistency, but limited to 3 rows
+    print("\n--- [DEBUG] Output Preview (from snippet_df) ---")
+    with pl.Config(tbl_width_chars=200, tbl_cols=-1, tbl_rows=10):
+        print(snippet_df)
+    print("--- [DEBUG] End of DataFrame: snippet_df ---")
+    sys.stdout.flush()
         
     print("\n--- Output Preview: First 3 rows, All columns ---")
     with pl.Config(set_fmt_str_lengths=25, tbl_width_chars=160, tbl_cols=4,
