@@ -1,7 +1,7 @@
 from skbio.stats.composition import clr, multi_replace
 import polars as pl
 import numpy as np
-from typing import Dict, Tuple
+from typing import Dict
 
 def apply_clr(
     df: pl.DataFrame, 
@@ -11,14 +11,11 @@ def apply_clr(
 ) -> Dict[str, pl.DataFrame]:
     """
     Applies Centered Log-Ratio (CLR) transformation
-    and returns a dictionary of DataFrames.
+    and returns a dictionary of WIDE DataFrames.
 
     - 'wide' format: Returns {'unstratified_clr': df_wide_clr}
-    - 'long' format: Returns {'stratified_wide_clr': df_wide_clr,
-                            'stratified_long_clr': df_long_clr}
-    
-    This allows the CLI to save the 'stratified_wide_clr' output
-    while using the 'stratified_long_clr' for other steps.
+    - 'long' format: Pivots to wide, applies CLR, and
+                      Returns {'stratified_wide_clr': df_wide_clr}
 
     Handles both unstratified (wide) and stratified (long) formats
     based on the provided 'format' flag. Applies multiplicative
@@ -41,11 +38,12 @@ def apply_clr(
         return {'unstratified_clr': df_wide_clr}
     
     elif format in ('long', 'stratified'):
-        # _clr_long now returns both wide and long versions
-        df_wide_clr, df_long_clr = _clr_long(df, sample_col, value_col)
+        # _clr_long now returns only the wide version
+        df_wide_clr = _clr_long(df, sample_col, value_col)
+
+        # Return the output 'wide' for the stratified
         return {
             'stratified_wide_clr': df_wide_clr,
-            'stratified_long_clr': df_long_clr
         }
     
     else:
@@ -55,30 +53,17 @@ def apply_clr(
         )
 
 def _clr_long(
-    df: pl.DataFrame, 
-    sample_col: str, 
+    df: pl.DataFrame,
+    sample_col: str,
     value_col: str
-) -> Tuple[pl.DataFrame, pl.DataFrame]:
+) -> pl.DataFrame:
     """
-    Internal function: Pivots long to wide, applies CLR, 
-    and unpivots back to long.
-    
-    Returns a tuple containing: (df_wide_clr, df_long_clr)
+    Internal function: Pivots long to wide and applies CLR.
+
+    Returns the df_wide_clr DataFrame.
 
    - Pivots long data to wide creating zeros from missing values.
    - Calls _clr_wide() to perform the transformation (which handles zeros).
-   - Unpivots data back to long format with 'CLR_Abundance' column.
-    
-     Example (LONG):
-        Input:
-            Order    Lv3                Sample           Total_PGPT_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         25.0
-            Bacilli  PHOSPHATE_SOL      Sample_A         15.0
-        
-        Output:
-            Order    Lv3                Sample           CLR_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         0.223144
-            Bacilli  PHOSPHATE_SOL      Sample_A        -0.223144
     """
     # 1. Identify all feature/taxonomy columns
     non_abundance_cols = [
@@ -95,25 +80,11 @@ def _clr_long(
     # 3. Apply CLR (delegated to _clr_wide)
     # This IS the 'stratified_wide_clr' output
     df_wide_clr = _clr_wide(df_wide)
-    
-    # 4. Identify sample columns that were created by the pivot
-    sample_cols_in_wide = [
-        c for c in df_wide_clr.columns if c not in non_abundance_cols
-    ] 
-    
-    # 5. Create dynamic output name
-    new_value_name = f"CLR_{value_col}"
 
-    # 6. Unpivot back to create the long version
-    df_long_clr = df_wide_clr.unpivot(
-        index=non_abundance_cols,
-        on=sample_cols_in_wide,
-        variable_name=sample_col, 
-        value_name=new_value_name
-    )
-    
-    # 7. Return BOTH dataframes
-    return df_wide_clr, df_long_clr
+    # [UNPIVOT STEP REMOVED]
+
+    # 4. Return ONLY the wide transformed dataframe
+    return df_wide_clr
 
 def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
     """
