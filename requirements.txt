@@ -12,6 +12,7 @@ scipy
 scikit-learn
 statsmodels
 scikit-bio
+patsy
 
 # Visualization
 matplotlib

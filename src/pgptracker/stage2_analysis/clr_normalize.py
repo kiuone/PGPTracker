@@ -1,84 +1,118 @@
 from skbio.stats.composition import clr, multi_replace
 import polars as pl
 import numpy as np
-from typing import Dict, Tuple
+from typing import Dict
+from pathlib import Path
+import shutil
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
+@profile_memory
 def apply_clr(
-    df: pl.DataFrame, 
-    format: str,
+    input_path: Path,
+    input_format: str,
+    output_dir: Path,
+    base_name: str,
     sample_col: str = "Sample",
     value_col: str = "Total_PGPT_Abundance"
-) -> Dict[str, pl.DataFrame]:
+) -> Dict[str, Path]:
     """
-    Applies Centered Log-Ratio (CLR) transformation
-    and returns a dictionary of DataFrames.
-
-    - 'wide' format: Returns {'unstratified_clr': df_wide_clr}
-    - 'long' format: Returns {'stratified_wide_clr': df_wide_clr,
-                            'stratified_long_clr': df_long_clr}
+    Reads an input file, applies Centered Log-Ratio (CLR) transformation
+    based on the specified format, and saves standardized output files.
     
-    This allows the CLI to save the 'stratified_wide_clr' output
-    while using the 'stratified_long_clr' for other steps.
+    This function handles I/O operations (read, copy, write) and
+    serves as the pre-processing step for analysis.
 
-    Handles both unstratified (wide) and stratified (long) formats
-    based on the provided 'format' flag. Applies multiplicative
-    replacement for zeros before transformation via skbio.
+    Case 1: input_format == 'long'
+    - Copies input to 'raw_long_{base_name}'
+    - Pivots input to 'raw_wide_{base_name}'
+    - Applies CLR to wide format and saves 'clr_wide_{base_name}'
+
+    Case 2: input_format == 'wide'
+    - Copies input to 'raw_wide_{base_name}'
+    - Applies CLR to wide format and saves 'clr_wide_{base_name}'
 
     Args:
-        df: Abundance table (Polars DataFrame).
-        format: Table format. Must be one of ['wide', 'unstratified', 
-                'long', 'stratified']. 
-        sample_col (str): Name of the sample column (for 'long' format).
-                    Defaults to "Sample".
+        input_path: Path to the raw input abundance table.
+        input_format: Table format. Must be one of ['wide', 'unstratified', 
+                      'long', 'stratified']. 
+        output_dir: Directory to save the output files.
+        base_name: The original filename (e.g., "my_table.tsv")
+                   used to construct output names.
+        sample_col (str): Name of the sample column (for 'long' format). 
         value_col (str): Name of the abundance/value column (for 'long' format).
-                    Defaults to "Total_PGPT_Abundance".
 
     Returns:
-        A dictionary mapping output names to CLR-transformed DataFrames.
+        A dictionary mapping standardized names to the Path
+        objects of the created files (e.g., 
+        {'raw_wide': Path(...), 'clr_wide': Path(...)}).
     """
-    if format in ('wide', 'unstratified'):
-        df_wide_clr = _clr_wide(df)
-        return {'unstratified_clr': df_wide_clr}
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_paths: Dict[str, Path] = {}
     
-    elif format in ('long', 'stratified'):
-        # _clr_long now returns both wide and long versions
-        df_wide_clr, df_long_clr = _clr_long(df, sample_col, value_col)
-        return {
-            'stratified_wide_clr': df_wide_clr,
-            'stratified_long_clr': df_long_clr
-        }
-    
+    # Define standard output paths
+    raw_wide_path = output_dir / f"raw_wide_{base_name}"
+    clr_wide_path = output_dir / f"clr_wide_{base_name}"
+
+    if input_format in ('long', 'stratified'):
+        # --- Case 1: Long Input ---
+        
+        # 1. Define and copy raw_long
+        raw_long_path = output_dir / f"raw_long_{base_name}"
+        shutil.copyfile(input_path, raw_long_path)
+        output_paths['raw_long'] = raw_long_path
+        
+        # 2. Pivot long to wide
+        df_long = pl.read_csv(input_path, separator="\t")
+        df_wide = _pivot_long_to_wide(df_long, sample_col, value_col)
+        
+        # 3. Save raw_wide
+        df_wide.write_csv(raw_wide_path, separator="\t")
+        output_paths['raw_wide'] = raw_wide_path
+        
+        # 4. Apply CLR (using the in-memory wide df)
+        df_wide_clr = _clr_wide(df_wide)
+        
+        # 5. Save clr_wide
+        df_wide_clr.write_csv(clr_wide_path, separator="\t")
+        output_paths['clr_wide'] = clr_wide_path
+
+    elif input_format in ('wide', 'unstratified'):
+        # --- Case 2: Wide Input ---
+
+        # 1. Copy raw_wide
+        shutil.copyfile(input_path, raw_wide_path)
+        output_paths['raw_wide'] = raw_wide_path
+        
+        # 2. Load the newly copied raw_wide file
+        df_wide = pl.read_csv(raw_wide_path, separator="\t")
+        
+        # 3. Apply CLR
+        df_wide_clr = _clr_wide(df_wide)
+        
+        # 4. Save clr_wide
+        df_wide_clr.write_csv(clr_wide_path, separator="\t")
+        output_paths['clr_wide'] = clr_wide_path
+        
     else:
         raise ValueError(
-            f"Invalid format: '{format}'. "
+            f"Invalid format: '{input_format}'. "
             f"Must be one of ['wide', 'unstratified', 'long', 'stratified']"
         )
+        
+    return output_paths
 
-def _clr_long(
+@profile_memory
+def _pivot_long_to_wide(
     df: pl.DataFrame, 
     sample_col: str, 
     value_col: str
-) -> Tuple[pl.DataFrame, pl.DataFrame]:
+) -> pl.DataFrame:
     """
-    Internal function: Pivots long to wide, applies CLR, 
-    and unpivots back to long.
+    Internal function: Pivots a long-format DataFrame to wide format.
     
-    Returns a tuple containing: (df_wide_clr, df_long_clr)
-
-   - Pivots long data to wide creating zeros from missing values.
-   - Calls _clr_wide() to perform the transformation (which handles zeros).
-   - Unpivots data back to long format with 'CLR_Abundance' column.
-    
-     Example (LONG):
-        Input:
-            Order    Lv3                Sample           Total_PGPT_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         25.0
-            Bacilli  PHOSPHATE_SOL      Sample_A         15.0
-        
-        Output:
-            Order    Lv3                Sample           CLR_Abundance
-            Bacilli  NITROGEN_FIXATION  Sample_A         0.223144
-            Bacilli  PHOSPHATE_SOL      Sample_A        -0.223144
+    - Identifies feature columns (non-sample, non-value).
+    - Pivots the table on the sample column.
+    - Fills missing values (implicit zeros) with 0.0.
     """
     # 1. Identify all feature/taxonomy columns
     non_abundance_cols = [
@@ -90,43 +124,22 @@ def _clr_long(
         values=value_col,
         index=non_abundance_cols,
         on=sample_col
-    ).fill_null(0.0)
+    ).fill_null(0.0) 
     
-    # 3. Apply CLR (delegated to _clr_wide)
-    # This IS the 'stratified_wide_clr' output
-    df_wide_clr = _clr_wide(df_wide)
-    
-    # 4. Identify sample columns that were created by the pivot
-    sample_cols_in_wide = [
-        c for c in df_wide_clr.columns if c not in non_abundance_cols
-    ] 
-    
-    # 5. Create dynamic output name
-    new_value_name = f"CLR_{value_col}"
+    return df_wide
 
-    # 6. Unpivot back to create the long version
-    df_long_clr = df_wide_clr.unpivot(
-        index=non_abundance_cols,
-        on=sample_cols_in_wide,
-        variable_name=sample_col, 
-        value_name=new_value_name
-    )
-    
-    # 7. Return BOTH dataframes
-    return df_wide_clr, df_long_clr
-
+@profile_memory
 def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
     """
     (Core Engine) 
     Performs CLR on wide/unstratified format (features x samples) data.
-    
     - Identifies numeric (sample) columns.
     - Transposes (D, N) -> (N, D) for scikit-bio.
-    - Handles D=1 and all-zero sample edge cases (result = 0).
+    - Handles D=1 and all-zero sample edge cases (result = 0). 
     - Applies multi_replace and clr on valid samples.
-    - Transposes (N, D) -> (D, N) and reconstructs DataFrame.
-
-     Example (WIDE):
+    - Transposes (N, D) -> (D, N) and reconstructs DataFrame. 
+    
+    Example (WIDE):
         Input:
             PGPT_ID           Sample_A  Sample_B
             NITROGEN_FIXATION 10        5
@@ -140,7 +153,7 @@ def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
     
     # 1. Identify columns by dtype
     sample_cols = [c for c in df.columns if df[c].dtype.is_numeric()]
-    feature_cols = [c for c in df.columns if c not in sample_cols]
+    feature_cols = [c for c in df.columns if c not in sample_cols] 
     
     if not sample_cols:
         return df # No numeric columns found
@@ -149,40 +162,38 @@ def _clr_wide(df: pl.DataFrame) -> pl.DataFrame:
     abundance_matrix = df.select(sample_cols).to_numpy()
     
     # 2. Transpose to (N_samples, D_features) for skbio
-    # THIS IS THE CRITICAL FIX for the 0.6019... bug
     abundance_matrix_T = abundance_matrix.T
     
     # 3. Get shape (N, D). Handle 1D array edge case.
     if abundance_matrix_T.ndim == 1:
-        # This happens if N=1 (single sample). Reshape to (1, D).
-        abundance_matrix_T = abundance_matrix_T.reshape(1, -1)
+         # This happens if N=1 (single sample). Reshape to (1, D). 
+         abundance_matrix_T = abundance_matrix_T.reshape(1, -1)
     
     if abundance_matrix_T.shape[0] == 0:
          clr_matrix_T = abundance_matrix_T # Handle empty matrix
     else:
-        N_samples, D_features = abundance_matrix_T.shape
+        _, D_features = abundance_matrix_T.shape
 
         # 4. Initialize output matrix.
-        clr_matrix_T = np.zeros_like(abundance_matrix_T)
-
+        clr_matrix_T = np.zeros_like(abundance_matrix_T) 
         # 5. GUARD RAIL 1: skbio.clr fails if D=1.
-        if D_features > 1:
+        if D_features > 1: 
             
             # 6. GUARD RAIL 2: skbio.multi_replace fails on all-zero rows.
-            valid_rows_mask = np.any(abundance_matrix_T != 0, axis=1)
+            valid_rows_mask = np.any(abundance_matrix_T != 0, axis=1) 
             
             if np.any(valid_rows_mask):
                 valid_abundance_matrix = abundance_matrix_T[valid_rows_mask]
                 
                 # 7. Run skbio ONLY on the valid subset (N_valid, D)
-                filled_matrix_T = multi_replace(valid_abundance_matrix)
+                filled_matrix_T = multi_replace(valid_abundance_matrix) 
                 valid_clr_matrix_T = clr(filled_matrix_T)
                 
                 # 8. Place the results back into the correct rows
                 clr_matrix_T[valid_rows_mask] = valid_clr_matrix_T
 
     # 9. Transpose back to (D, N) to match original df structure
-    clr_matrix = clr_matrix_T.T
+    # clr_matrix = clr_matrix_T.T
 
     # Reconstruct using a dictionary to explicitly map sample names
     # to the correct data columns (which are the rows of clr_matrix_T)
