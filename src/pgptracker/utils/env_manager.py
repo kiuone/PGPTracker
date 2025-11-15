@@ -180,33 +180,33 @@ def get_threads(args_threads: Optional[int]) -> int:
     """
     return args_threads or detect_available_cores()
 
-def detect_gpu() -> tuple[bool, str]:
-    """
-    Detect GPU availability for TensorFlow/TensorLy.
+# def detect_gpu() -> tuple[bool, str]:
+#     """
+#     Detect GPU availability for TensorFlow/TensorLy.
     
-    Returns:
-        (has_gpu, backend_name)
-        Backends: 'cuda' (NVIDIA), 'mps' (Apple Metal), 'cpu'
+#     Returns:
+#         (has_gpu, backend_name)
+#         Backends: 'cuda' (NVIDIA), 'mps' (Apple Metal), 'cpu'
     
-    Example:
-        has_gpu, backend = detect_gpu()
-        if has_gpu:
-            print(f"Using GPU backend: {backend}")
-    """
-    try:
-        import torch
-        if torch.cuda.is_available():
-            return (True, 'cuda')
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return (True, 'mps')
-    except ImportError:
-        pass
+#     Example:
+#         has_gpu, backend = detect_gpu()
+#         if has_gpu:
+#             print(f"Using GPU backend: {backend}")
+#     """
+#     try:
+#         import torch
+#         if torch.cuda.is_available():
+#             return (True, 'cuda')
+#         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+#             return (True, 'mps')
+#     except ImportError:
+#         pass
     
-    try:
-        import tensorflow as tf
-        if tf.config.list_physical_devices('GPU'):
-            return (True, 'cuda')
-    except ImportError:
-        pass
+#     try:
+#         import tensorflow as tf
+#         if tf.config.list_physical_devices('GPU'):
+#             return (True, 'cuda')
+#     except ImportError:
+#         pass
     
-    return (False, 'cpu')
+#     return (False, 'cpu')

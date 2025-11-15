@@ -1,184 +1,222 @@
-# -*- coding: utf-8 -*-
-"""
-Calculates alpha and beta diversity metrics and performs PERMANOVA tests.
-
-Assumes input DataFrames for alpha/beta calculations are in 'wide' format
-(features x samples), as the 'long' to 'wide' pivot is now handled
-by the upstream 'clr_normalize.py' script.
-
-Functions in this module perform calculations only and return data.
-Visualization is handled by 'exports.visualizations'.
-"""
-
+import pytest
 import polars as pl
 import numpy as np
-import skbio.stats.distance
+import pandas as pd
+import skbio
+from skbio.stats.distance import DistanceMatrix
 import skbio.diversity
-import patsy 
-from patsy import dmatrix #type: ignore[attr-defined]
-from typing import List, Literal, Optional, Dict, Any, Tuple
-from pgptracker.stage2_analysis.clr_normalize import apply_clr
+import skbio.stats.distance
+from scipy.spatial.distance import euclidean
+from typing import List, Literal, Dict, Any, Tuple
 
-# Define common metric types
-AlphaMetric = Literal['shannon', 'simpson', 'pielou_e', 'observed_features']
-BetaMetric = Literal['braycurtis', 'jaccard', 'aitchison', 'euclidean']
+# Define the literal type for Pylance/MyPy
+AlphaMetric = Literal['observed_features', 'shannon', 'simpson', 'pielou_e']
 
-def _prepare_skbio_matrix(
-    df_wide: pl.DataFrame,
-    feature_col: str
-) -> Tuple[np.ndarray, List[str]]:
+def _prepare_skbio_counts(
+    df_wide_N_D: pl.DataFrame, 
+    id_col: str
+) -> tuple[np.ndarray, List[str]]:
     """
-    Internal helper: Converts wide (features x samples) df to skbio-ready format.
-
-    Args:
-        df_wide: A wide DataFrame (features are rows, samples are columns).
-        feature_col: The name of the column containing feature IDs.
-
-    Returns:
-        A tuple of:
-        - (np.ndarray): The (samples x features) matrix.
-        - (List[str]): The list of sample IDs, matching the matrix rows.
+    Converts N×D Polars DataFrame to (N, D) numpy array and sample IDs
+    for skbio alpha diversity.
     """
-    # 1. Transpose to (samples x features) using pandas
-    matrix_pd = df_wide.to_pandas().set_index(feature_col).T
-    
-    # 2. Get sample IDs from the new index
-    sample_ids = matrix_pd.index.to_list()
-    
-    # 3. Get the numpy matrix
-    counts_matrix = matrix_pd.to_numpy()
-    
+    sample_ids = df_wide_N_D.get_column(id_col).to_list()
+    counts_matrix = df_wide_N_D.drop(id_col).to_numpy()
     return counts_matrix, sample_ids
 
+def _prepare_skbio_beta(
+    df_wide: pl.DataFrame, 
+    id_col: str
+) -> tuple[np.ndarray, List[str]]:
+    """
+    Converts N×D (samples x features) or D×N (features x samples) DataFrame
+    to the (N, D) numpy array and sample IDs required by skbio.
+    
+    This function is now robust to either orientation, but N×D is preferred.
+    """
+    if id_col not in df_wide.columns:
+        raise KeyError(f"ID column '{id_col}' not in DataFrame.")
+
+    # Check if first non-ID column is numeric.
+    first_data_col = next(c for c in df_wide.columns if c != id_col)
+    
+    if df_wide[first_data_col].dtype.is_numeric():
+        # --- Input is N×D (samples × features) ---
+        # e.g., 'Sample' | 'Feat_A' | 'Feat_B'
+        sample_ids = df_wide.get_column(id_col).to_list()
+        matrix = df_wide.drop(id_col).to_numpy()
+        return matrix, sample_ids
+    else:
+        # --- Input is D×N (features × samples) ---
+        # e.g., 'Feature' | 'S1' | 'S2'
+        # Transpose to N×D for skbio
+        sample_ids = df_wide.columns[1:]
+        matrix = df_wide.drop(id_col).to_numpy().T # Transpose
+        return matrix, list(sample_ids)
+
 def calculate_alpha_diversity(
-    df_wide: pl.DataFrame,
-    feature_col: str,
+    df_wide_N_D_raw: pl.DataFrame,
+    sample_id_col: str,
     metrics: List[AlphaMetric]
 ) -> pl.DataFrame:
     """
-    Calculate one or more alpha diversity metrics.
+    Calculates alpha diversity metrics from a raw N×D (samples × features) table.
 
     Args:
-        df_wide: A wide format abundance DataFrame (features x samples).
-                 This table should contain RAW ABUNDANCES, not CLR.
-        feature_col: The column name representing features (e.g., 'PGPT_ID').
-        metrics: List of scikit-bio metrics (e.g., ['shannon', 'simpson']).
+        df_wide_N_D_raw: N×D Polars DataFrame (samples × features) of RAW COUNTS.
+        sample_id_col: Name of the sample ID column (e.g., "Sample").
+        metrics: List of metrics to calculate (e.g., ['shannon', 'observed_features']).
 
     Returns:
-        A Polars DataFrame in long format: [Sample, Metric, Value]
+        A long-format Polars DataFrame with [Sample, Metric, Value].
     """
-    # 1. Convert (features x samples) df to (samples x features) matrix
-    counts_matrix, sample_ids = _prepare_skbio_matrix(df_wide, feature_col)
+    counts_matrix, sample_ids = _prepare_skbio_counts(
+        df_wide_N_D_raw, sample_id_col
+    )
     
-    results = []
-    # 2. Calculate each metric (1-liner)
+    results_list = []
     for metric in metrics:
-        alpha_div = skbio.diversity.alpha_diversity(
-            metric, counts_matrix, ids=sample_ids)
+        # **BUG FIX**: Use np.log2 for Shannon, not np.log (base e)
+        if metric == 'shannon':
+            # skbio 'shannon' metric uses base e. np.log2(S) is H_max.
+            # We must calculate it manually for log base 2.
+            def shannon_log2(counts):
+                freqs = counts / np.sum(counts)
+                non_zero_freqs = freqs[freqs > 0]
+                return -np.sum(non_zero_freqs * np.log2(non_zero_freqs))
+            
+            values = [shannon_log2(row) if np.sum(row) > 0 else 0.0 for row in counts_matrix]
         
-        # 3. Format output
-        metric_df = pl.from_pandas(alpha_div.to_frame(name='Value')).with_columns(
-            pl.lit(metric).alias('Metric')
-        ).select(
-            pl.col('index').alias('Sample'),
-            pl.col('Metric'),
-            pl.col('Value'))
-        results.append(metric_df)
-
-    return pl.concat(results)
+        elif metric == 'pielou_e':
+            # Pielou's Evenness J = H' / H_max = H_shannon / log2(S)
+            def pielou(counts):
+                S = (counts > 0).sum()
+                if S < 2:
+                    return None # Evenness is undefined for 1 feature
+                
+                freqs = counts / np.sum(counts)
+                non_zero_freqs = freqs[freqs > 0]
+                H = -np.sum(non_zero_freqs * np.log2(non_zero_freqs))
+                H_max = np.log2(S)
+                return H / H_max
+                
+            values = [pielou(row) if np.sum(row) > 0 else 0.0 for row in counts_matrix]
+        
+        else:
+            # Use skbio's built-in functions for 'observed_features' and 'simpson'
+            # Note: skbio.shannon uses base e, so we implemented it manually.
+            values = skbio.diversity.alpha_diversity(
+                metric, counts_matrix, ids=sample_ids
+            ).to_list()
+        
+        for sample, value in zip(sample_ids, values):
+            results_list.append({
+                "Sample": sample,
+                "Metric": metric,
+                "Value": value
+            })
+            
+    return pl.DataFrame(results_list)
 
 def calculate_beta_diversity(
     df_wide: pl.DataFrame,
-    feature_col: str,
-    metric: BetaMetric
-) -> skbio.stats.distance.DistanceMatrix:
+    id_col: str,
+    metric: Literal['braycurtis', 'jaccard', 'aitchison']
+) -> DistanceMatrix:
     """
-    Calculate a beta diversity distance matrix.
-
-    CRITICAL:
-    - For 'braycurtis', 'jaccard', etc., pass the RAW ABUNDANCE wide table.
-    - For 'aitchison', pass the CLR-TRANSFORMED wide table
-      (e.g., 'unstratified_clr' or 'stratified_wide_clr').
+    Calculates beta diversity from a wide DataFrame.
     
+    Handles N×D (preferred) or D×N inputs.
+    - 'braycurtis', 'jaccard': Use N×D raw counts table.
+    - 'aitchison': Use N×D CLR-transformed table.
+
     Args:
-        df_wide: A wide format abundance DataFrame (features x samples).
-        feature_col: The column name representing features.
-        metric: The scikit-bio metric. If 'aitchison', this function
-                will run 'euclidean' (as Aitchison = Euclidean on CLR).
+        df_wide: Polars DataFrame (N×D or D×N).
+        id_col: Name of the ID column ('Sample' for N×D, 'Feature' for D×N).
+        metric: Distance metric to use.
 
     Returns:
-        A scikit-bio DistanceMatrix object (samples x samples).
+        A skbio DistanceMatrix object.
     """
+    matrix, sample_ids = _prepare_skbio_beta(df_wide, id_col)
     
-    # 1. Convert (features x samples) df to (samples x features) matrix
-    data_matrix, sample_ids = _prepare_skbio_matrix(df_wide, feature_col)
-
-    effective_metric = metric
+    # --- BUG FIX START ---
+    # `skbio.diversity.beta_diversity` CANNOT handle negative values (CLR data)
+    # It assumes "counts", even for euclidean.
     if metric == 'aitchison':
-        # Aitchison distance IS Euclidean distance on CLR-transformed data.
-        # We assume the user passed the CLR-transformed table.
-        effective_metric = 'euclidean'
-
-    # 2. Calculate beta diversity (1-liner)
-    dist_matrix = skbio.diversity.beta_diversity(
-        effective_metric, data_matrix, ids=sample_ids)
+        # Aitchison = Euclidean distance on CLR data.
+        # We must use `DistanceMatrix.from_iterable` for pairwise Euclidean
+        # which correctly handles negative values.
+        # --- BUG FIX START ---
+        # Passar a *função* 'euclidean', não a string.
+        dm = DistanceMatrix.from_iterable(
+            matrix, metric=euclidean, keys=sample_ids)
+    else:
+        # Bray-Curtis and Jaccard work as they expect non-negative counts
+        dm = skbio.diversity.beta_diversity(
+            metric, matrix, ids=sample_ids
+        )
+    # --- BUG FIX END ---
     
-    # Aitchison distance IS Euclidean distance on CLR-transformed data.
-    # The 'metric' attribute on the result object is not writable.
-
-    return dist_matrix
+    return dm
 
 def permanova_test(
-    distance_matrix: skbio.stats.distance.DistanceMatrix,
+    distance_matrix: DistanceMatrix,
     metadata: pl.DataFrame,
     sample_id_col: str,
-    formula: str,
-    permutations: int = 999
+    formula: str
 ) -> Dict[str, Any]:
     """
-    Performs a PERMANOVA test using an R-style formula.
+    Performs a PERMANOVA test on a distance matrix and metadata.
 
     Args:
-        distance_matrix: A (samples x samples) distance matrix.
-        metadata: A DataFrame containing sample metadata.
-        sample_id_col: The name of the column in metadata matching matrix IDs.
-        formula: An R-style formula (e.g., "~Treatment + pH").
-        permutations: Number of permutations to run.
+        distance_matrix: An skbio DistanceMatrix.
+        metadata: A Polars DataFrame containing metadata.
+        sample_id_col: The name of the sample ID column in the metadata.
+        formula: The R-style formula (e.g., "~Group").
 
     Returns:
-        A dictionary of results from scikit-bio (e.g., 'p_value', 'test_statistic').
-    
-    Raises:
-        ValueError: If metadata is missing samples or columns.
+        A dictionary of PERMANOVA results.
     """
-    if sample_id_col not in metadata.columns:
-        raise ValueError(
-            f"Sample ID column '{sample_id_col}' not found in metadata. "
-            f"Available columns: {metadata.columns}")
-        
-    metadata_pd = metadata.to_pandas().set_index(sample_id_col)
+    # Ensure metadata IDs match the distance matrix IDs
+    dm_ids = set(distance_matrix.ids)
+    md_ids = set(metadata.get_column(sample_id_col).to_list())
     
-    # Align metadata to the distance matrix order
-    try:
-        metadata_aligned = metadata_pd.loc[distance_matrix.ids]
-    except KeyError:
+    if not dm_ids.issubset(md_ids):
+        missing_ids = dm_ids - md_ids
         raise ValueError(
-            "Metadata is missing SampleIDs present in the distance matrix. "
-            "Please check for mismatches."
+            f"Metadata is missing SampleIDs that are in the "
+            f"distance matrix: {missing_ids}"
         )
-
-    # Use patsy to create the design matrix from the formula
-    try:
-        grouping_df = dmatrix(
-            formula, data=metadata_aligned, return_type='dataframe')
-    except Exception as e:
-        raise ValueError(
-            f"Failed to parse formula '{formula}'. "
-            f"Check column names. Error: {e}")
-
-    # 1-liner calculation
-    results = skbio.stats.distance.permanova(
-        distance_matrix, grouping=grouping_df, permutations=permutations)
     
-    # Return as a standard dict
-    return dict(results)
+    # Filter and reorder metadata to match the distance matrix
+    metadata_pd = (
+        metadata
+        .filter(pl.col(sample_id_col).is_in(dm_ids))
+        .to_pandas()
+        .set_index(sample_id_col)
+        # --- BUG FIX START ---
+        # Must be list(ids), not tuple(ids), to avoid Pandas IndexingError
+        .loc[list(distance_matrix.ids)]
+        # --- BUG FIX END ---
+    )
+
+    try:
+        results = skbio.stats.distance.permanova(
+            distance_matrix,
+            metadata_pd,
+            column=formula.replace("~", "").strip(),
+            permutations=999
+        )
+    except Exception as e:
+        # Catch errors from skbio (e.g., bad column name)
+        raise ValueError(f"Failed to run PERMANOVA: {e}")
+
+    # **BUG FIX**: skbio results key is 'p-value' (hyphen), not 'p_value'
+    return {
+        'method': 'PERMANOVA',
+        'formula': formula,
+        'p_value': results['p-value'],
+        'test_statistic': results['test statistic'],
+        'permutations': results['number of permutations']
+    }

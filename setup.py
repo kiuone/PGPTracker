@@ -17,8 +17,7 @@ if requirements_file.exists():
     requirements = [
         line.strip() 
         for line in requirements_file.read_text().splitlines()
-        if line.strip() and not line.startswith("#")
-    ]
+        if line.strip() and not line.startswith("#")]
 
 setup(
     name="pgptracker",
@@ -50,6 +49,8 @@ setup(
             "pytest>=8.0",
             "pytest-cov>=4.0",
             "pytest-mock>=3.12",
+            "build",
+            "twine",
         ],
     },
     entry_points={

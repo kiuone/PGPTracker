@@ -1,178 +1,137 @@
-# -*- coding: utf-8 -*-
-"""
-Calculates ordination methods (PCA, PCoA, t-SNE).
-
-Assumes input DataFrames for PCA/t-SNE are in 'wide' format
-(features x samples) or are pre-computed matrices.
-
-Functions in this module perform calculations only and return data.
-Visualization is handled by 'exports.visualizations'.
-"""
-
+import pytest
 import polars as pl
-import skbio
 import numpy as np
-import skbio.stats.ordination
-import skbio.stats.distance
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
-from skbio.stats.ordination import OrdinationResults
+import skbio
+from skbio.stats.distance import DistanceMatrix
+from skbio.stats.ordination import OrdinationResults, pcoa
 from sklearn.decomposition import PCA as SklearnPCA
-from typing import Literal, Optional, Tuple, List, Any
+from sklearn.manifold import TSNE
+from scipy.cluster.hierarchy import linkage
+from typing import Tuple, List
 
 def _prepare_skbio_matrix(
-    df_wide: pl.DataFrame,
-    feature_col: str
+    df_wide_N_D: pl.DataFrame, 
+    sample_id_col: str
 ) -> Tuple[np.ndarray, List[str], List[str]]:
     """
-    Internal helper: Converts wide (features x samples) df to sklearn-ready format.
-
+    Validates N×D DataFrame and extracts matrix, sample IDs, and feature IDs.
+    
     Args:
-        df_wide: A wide DataFrame (features are rows, samples are columns).
-        feature_col: The name of the column containing feature IDs.
+        df_wide_N_D: N×D (samples × features) Polars DataFrame.
+        sample_id_col: Name of the sample ID column (e.g., "Sample").
 
     Returns:
-        A tuple of:
-        - (np.ndarray): The (samples x features) matrix.
-        - (List[str]): The list of sample IDs, matching the matrix rows.
-        - (List[str]): The list of feature IDs, matching the matrix columns.
+        Tuple: (matrix, sample_ids, feature_ids)
     """
-    matrix_pd = df_wide.to_pandas().set_index(feature_col).T
-    sample_ids = matrix_pd.index.to_list()
-    feature_ids = matrix_pd.columns.to_list()
-    matrix = matrix_pd.to_numpy()
+    if sample_id_col not in df_wide_N_D.columns:
+        raise KeyError(f"Sample ID column '{sample_id_col}' not in DataFrame.")
+        
+    sample_ids = df_wide_N_D.get_column(sample_id_col).to_list()
+    feature_ids = [c for c in df_wide_N_D.columns if c != sample_id_col]
+    
+    if not feature_ids:
+        raise ValueError("No feature columns found in DataFrame.")
+        
+    matrix = df_wide_N_D.select(feature_ids).to_numpy()
     
     return matrix, sample_ids, feature_ids
 
-def run_pcoa(
-    distance_matrix: skbio.stats.distance.DistanceMatrix
-) -> skbio.stats.ordination.OrdinationResults:
-    """
-    Performs Principal Coordinate Analysis (PCoA).
-
-    This is a 1-line wrapper for the scikit-bio implementation.
-
-    Args:
-        distance_matrix: A (samples x samples) distance matrix,
-                         e.g., from calculate_beta_diversity().
-
-    Returns:
-        An skbio OrdinationResults object.
-    """
-    # 1-liner calculation
-    return skbio.stats.ordination.pcoa(distance_matrix)
-
-def calculate_variance_explained(
-    ordination_results: (OrdinationResults | SklearnPCA), # skbio.OrdinationResults or sklearn.PCA
-    n_components: int = 3
-) -> pl.DataFrame:
-    """
-    Extracts the variance explained from PCoA or PCA results.
-
-    Args:
-        ordination_results: The output object from run_pcoa() or run_pca().
-        n_components: How many components to report.
-
-    Returns:
-        A DataFrame with [Component, Proportion_Explained, Cumulative_Proportion].
-    """
-    if isinstance(ordination_results, OrdinationResults):
-        # scikit-bio PCoA results
-        variance_explained = ordination_results.proportion_explained
-    elif isinstance(ordination_results, SklearnPCA):
-        # scikit-learn PCA results
-        variance_explained = ordination_results.explained_variance_ratio_
-    else:
-        raise TypeError(
-            "Input must be skbio.stats.ordination.OrdinationResults or "
-            "sklearn.decomposition.PCA"
-        )
-
-    components = [f"PC{i+1}" for i in range(len(variance_explained))] # type: ignore[arg-type]
-    
-    df = pl.DataFrame({
-        "Component": components,
-        "Proportion_Explained": variance_explained
-    }).with_columns(
-        pl.col("Proportion_Explained").cum_sum().alias("Cumulative_Proportion")
-    )
-    
-    return df.head(n_components)
-
 def run_pca(
-    df_clr_wide: pl.DataFrame,
-    feature_col: str,
-    n_components: int = 3
-) -> Tuple[pl.DataFrame, PCA]:
+    df_wide_N_D_clr: pl.DataFrame, 
+    sample_id_col: str, 
+    n_components: int = 2
+) -> Tuple[pl.DataFrame, SklearnPCA]:
     """
-    Performs Principal Component Analysis (PCA).
-
-    CRITICAL: This function *must* be run on a CLR-transformed
-    wide (features x samples) table.
-
+    Performs PCA on an N×D CLR-transformed DataFrame.
+    
     Args:
-        df_clr_wide: A wide, CLR-transformed DataFrame (features x samples).
-        feature_col: The name of the feature ID column.
-        n_components: Number of components to calculate.
+        df_wide_N_D_clr: N×D (samples × features) CLR-transformed data.
+        sample_id_col: Name of the sample ID column (e.g., "Sample").
+        n_components: Number of principal components.
 
     Returns:
-        A tuple containing:
-        - pc_scores (pl.DataFrame): The PC scores [Sample, PC1, PC2, ...].
-        - pca_model (PCA): The fitted scikit-learn model object.
+        Tuple: (Polars DataFrame of PC scores, fitted SklearnPCA model)
     """
-    # 1. Convert (features x samples) df to (samples x features) matrix
-    matrix, sample_ids, _ = _prepare_skbio_matrix(df_clr_wide, feature_col)
+    matrix, sample_ids, _ = _prepare_skbio_matrix(df_wide_N_D_clr, sample_id_col)
     
-    # 2. 2-liner calculation
-    pca_model = PCA(n_components=n_components)
-    pc_scores_np = pca_model.fit_transform(matrix)
+    pca = SklearnPCA(n_components=n_components, random_state=42)
+    scores = pca.fit_transform(matrix)
     
-    # 3. Format as DataFrame
-    pc_cols = [f"PC{i+1}" for i in range(n_components)]
-    pc_scores = pl.DataFrame(pc_scores_np, schema=pc_cols).with_columns(
-        pl.Series("Sample", sample_ids)
-    ).select("Sample", *pc_cols) # Put Sample column first
+    col_names = [f"PC{i+1}" for i in range(n_components)]
     
-    return pc_scores, pca_model
+    df_scores = pl.DataFrame(
+        scores,
+        schema=col_names
+    ).insert_column(0, pl.Series("Sample", sample_ids))
+    
+    return df_scores, pca
+
+def run_pcoa(distance_matrix: DistanceMatrix) -> OrdinationResults:
+    """
+    Performs PCoA on a pre-computed distance matrix.
+    """
+    return pcoa(distance_matrix)
 
 def run_tsne(
-    data_or_matrix: np.ndarray,
+    matrix_N_D: np.ndarray, 
     sample_ids: List[str],
-    metric: Literal['euclidean', 'precomputed'] = 'euclidean',
-    n_components: int = 2,
-    perplexity: float = 30.0,
-    random_state: Optional[int] = 42
+    metric: str = 'euclidean',
+    perplexity: float = 2.0,
+    random_state: int = 42
 ) -> pl.DataFrame:
     """
-    Performs t-distributed Stochastic Neighbor Embedding (t-SNE).
-
-    CRITICAL:
-    - If metric='euclidean', input *must* be (samples x features) CLR data.
-    - If metric='precomputed', input *must* be a (samples x samples) distance matrix.
-
+    Runs t-SNE on an N×D matrix.
+    
     Args:
-        data_or_matrix: The (samples x ...) numpy array.
-        sample_ids: List of sample IDs matching the matrix rows.
-        metric: 'euclidean' (for CLR data) or 'precomputed' (for distance matrix).
-        n_components: Number of dimensions (usually 2).
-        perplexity: t-SNE perplexity parameter.
+        matrix_N_D: N×D (samples × features) numpy array.
+        sample_ids: List of sample IDs.
+        metric: Distance metric.
+        perplexity: t-SNE perplexity. Should be < n_samples.
         random_state: Seed for reproducibility.
 
     Returns:
-        A DataFrame with t-SNE embeddings [Sample, tSNE1, tSNE2].
+        Polars DataFrame of t-SNE scores.
     """
-    # 1. 2-liner calculation
-    tsne_model = TSNE(
-        n_components=n_components,
+    n_samples = matrix_N_D.shape[0]
+    if perplexity >= n_samples:
+        perplexity = max(1.0, n_samples - 1.0) # Adjust perplexity
+        
+    tsne = TSNE(
+        n_components=2,
+        perplexity=perplexity,
         metric=metric,
-        perplexity=min(perplexity, len(sample_ids) - 1), # Perplexity must be < n_samples
         random_state=random_state,
-        init='random'
+        init='pca',
+        learning_rate='auto'
     )
-    tsne_embedding = tsne_model.fit_transform(data_or_matrix)
     
-    # 2. Format as DataFrame
-    tsne_cols = [f"tSNE{i+1}" for i in range(n_components)]
-    return pl.DataFrame(tsne_embedding, schema=tsne_cols).with_columns(
-        pl.Series("Sample", sample_ids)
-    ).select("Sample", *tsne_cols)
+    scores = tsne.fit_transform(matrix_N_D)
+    
+    df_scores = pl.DataFrame(
+        scores,
+        schema=["tSNE1", "tSNE2"]
+    ).insert_column(0, pl.Series("Sample", sample_ids))
+    
+    return df_scores
+
+def run_hierarchical_clustering(
+    distance_matrix: DistanceMatrix, 
+    method: str = 'ward'
+) -> Tuple[np.ndarray, List[str]]:
+    """
+    Performs hierarchical clustering on a distance matrix.
+    
+    Args:
+        distance_matrix: An skbio DistanceMatrix.
+        method: Clustering method (e.g., 'ward', 'single', 'complete').
+
+    Returns:
+        Tuple: (linkage_matrix, sample_ids)
+    """
+    sample_ids = distance_matrix.ids
+    # Convert skbio DistanceMatrix to condensed distance vector
+    condensed_dm = distance_matrix.condensed_form()
+    
+    linkage_matrix = linkage(condensed_dm, method=method)
+    
+    return linkage_matrix, list(sample_ids)

@@ -1,63 +1,132 @@
-# -*- coding: utf-8 -*-
-"""
-Performs statistical comparisons (Kruskal-Wallis, Mann-Whitney U),
-calculates effect sizes (Cliff's Delta), and applies FDR correction.
-
-These functions are designed to operate on LONG-FORMAT data,
-(e.g., 'stratified_long_clr') as it is the most efficient
-format for grouped statistical tests.
-"""
-
+import pytest
 import polars as pl
 import numpy as np
-import scipy.stats as sp_stats
+import scipy.stats as ss
+from typing import List, Optional, Literal
 from statsmodels.stats.multitest import multipletests
-from typing import List, Dict, Optional, Any, Tuple
 
-def _kruskal_helper(df_group: pl.DataFrame, group_col: str, value_col: str) -> pl.DataFrame:
-    """Internal helper function to be called by group_by.apply()"""
-    
-    # 1. Aggregate values into lists, one list per group
-    value_lists = df_group.group_by(group_col).agg(
-        pl.col(value_col)
-    )[value_col].to_list()
-
-    # 2. Convert each list of values into a numpy array
-    group_data = [np.array(values) for values in value_lists]
-    
-    # 3. Unpack the list of arrays into scipy.stats.kruskal
-    stat, pval = sp_stats.kruskal(*group_data)
-    return pl.DataFrame({'statistic': [stat], 'p_value': [pval]})
-
-def kruskal_wallis_test(
-    df_long: pl.DataFrame,
+def _prepare_stats_long_df(
+    df_wide_N_D: pl.DataFrame,
+    metadata: pl.DataFrame,
+    sample_id_col: str,
     feature_col: str,
     group_col: str,
     value_col: str
 ) -> pl.DataFrame:
     """
-    Performs Kruskal-Wallis H-test for all features.
+    Prepares the long-format DataFrame needed for statistical tests.
+    
+    1. Reads N×D wide table (e.g., CLR-transformed).
+    2. Reads metadata table.
+    3. Joins them on Sample ID.
+    4. Unpivots (melts) the N×D table to long format.
+    
+    Returns:
+        A long DataFrame: [sample_id_col, group_col, feature_col, value_col]
+    """
+    if sample_id_col not in df_wide_N_D.columns:
+        raise KeyError(f"Sample ID column '{sample_id_col}' not in wide data.")
+    if sample_id_col not in metadata.columns:
+        raise KeyError(f"Sample ID column '{sample_id_col}' not in metadata.")
+    if group_col not in metadata.columns:
+        raise KeyError(f"Group column '{group_col}' not in metadata.")
 
+    # Select only the necessary columns from metadata
+    md_subset = metadata.select([sample_id_col, group_col])
+    
+    # Join wide data with metadata
+    df_joined = df_wide_N_D.join(md_subset, on=sample_id_col, how="inner")
+    
+    if df_joined.height == 0:
+        raise ValueError(
+            f"No samples matched between data and metadata on column '{sample_id_col}'."
+        )
+
+    # Unpivot (melt) to long format
+    feature_cols = [
+        c for c in df_wide_N_D.columns if c != sample_id_col
+    ]
+    
+    df_long = df_joined.unpivot(
+        index=[sample_id_col, group_col],
+        on=feature_cols,
+        variable_name=feature_col,
+        value_name=value_col
+    )
+    
+    return df_long
+
+def kruskal_wallis_test(
+    df_wide_N_D: pl.DataFrame,
+    metadata: pl.DataFrame,
+    sample_id_col: str,
+    feature_col: str,
+    group_col: str,
+    value_col: str
+) -> pl.DataFrame:
+    """
+    Performs Kruskal-Wallis H-test on each feature, grouped by the group_col.
+    
     Args:
-        df_long: A LONG-format DataFrame (e.g., 'stratified_long_clr').
-        feature_col: The feature to group by (e.g., 'Lv3', 'PGPT_ID').
-        group_col: The metadata column with groups (e.g., 'Treatment').
-        value_col: The abundance column to test (e.g., 'CLR_Abundance').
+        df_wide_N_D: The N×D (samples x features) CLR-transformed data.
+        metadata: The metadata table.
+        sample_id_col: Name of the sample ID column (e.g., "Sample").
+        feature_col: Name to give the 'feature' column in the output (e.g., "Feature").
+        group_col: Name of the metadata grouping column (e.g., "Group").
+        value_col: Name to give the 'value' column in the output (e.g., "Value").
 
     Returns:
-        A DataFrame with [feature_col, statistic, p_value].
+        A Polars DataFrame: [Feature, test_statistic, p_value]
     """
     print(f"Running Kruskal-Wallis on '{feature_col}' grouped by '{group_col}'...")
     
-    # Group by the feature (e.g., 'PGPT_ID'), then apply the test
-    # to the subgroups (e.g., 'Treatment' A, B, C)
-    results = df_long.group_by(feature_col).apply( #type: ignore[arg-type]
-        lambda df_group: _kruskal_helper(df_group, group_col, value_col)) 
-    
-    return results.sort('p_value')
+    try:
+        df_long = _prepare_stats_long_df(
+            df_wide_N_D, metadata, sample_id_col, 
+            feature_col, group_col, value_col
+        )
+    except (KeyError, ValueError) as e:
+        print(f"  -> Error preparing data: {e}")
+        return pl.DataFrame(schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64})
+
+    results = []
+    for feature_tuple, data in df_long.group_by(feature_col):
+        feature = feature_tuple[0]
+
+        groups = data.get_column(group_col).unique().to_list()
+
+        if len(groups) < 2:
+            results.append((feature, np.nan, np.nan))
+            continue
+            
+        group_arrays = [
+            data.filter(pl.col(group_col) == g).get_column(value_col).to_numpy()
+            for g in groups
+        ]
+        
+        # Remove empty arrays just in case
+        group_arrays = [arr for arr in group_arrays if len(arr) > 0]
+        
+        if len(group_arrays) < 2:
+            results.append((feature, np.nan, np.nan))
+            continue
+            
+        try:
+            stat, pval = ss.kruskal(*group_arrays)
+            results.append((feature, stat, pval))
+        except ValueError:
+            results.append((feature, np.nan, np.nan))
+            
+    return pl.DataFrame(
+        results,
+        schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64}
+    ).sort("Feature")
+
 
 def mann_whitney_u_test(
-    df_long: pl.DataFrame,
+    df_wide_N_D: pl.DataFrame,
+    metadata: pl.DataFrame,
+    sample_id_col: str,
     feature_col: str,
     group_col: str,
     value_col: str,
@@ -65,106 +134,90 @@ def mann_whitney_u_test(
     group_2: str
 ) -> pl.DataFrame:
     """
-    Performs Mann-Whitney U-test for all features between two specific groups.
-
-    Args:
-        df_long: A LONG-format DataFrame.
-        feature_col: The feature to group by (e.g., 'Lv3').
-        group_col: The metadata column with groups (e.g., 'Treatment').
-        value_col: The abundance column to test (e.g., 'CLR_Abundance').
-        group_1: The name of the first group.
-        group_2: The name of the second group.
-
-    Returns:
-        A DataFrame with [feature_col, statistic, p_value].
+    Performs pairwise Mann-Whitney U-test on each feature between two groups.
+    
+    (See kruskal_wallis_test for arg descriptions)
     """
     print(f"Running Mann-Whitney U between '{group_1}' and '{group_2}'...")
     
-    # Filter data to only include the two groups of interest
-    df_filtered = df_long.filter(pl.col(group_col).is_in([group_1, group_2]))
-
-    def _mw_helper(df_group: pl.DataFrame) -> pl.DataFrame:
-        g1_data = df_group.filter(pl.col(group_col) == group_1)[value_col].to_numpy()
-        g2_data = df_group.filter(pl.col(group_col) == group_2)[value_col].to_numpy()
+    try:
+        df_long = _prepare_stats_long_df(
+            df_wide_N_D, metadata, sample_id_col, 
+            feature_col, group_col, value_col
+        )
+    except (KeyError, ValueError) as e:
+        print(f"  -> Error preparing data: {e}")
+        return pl.DataFrame(schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64})
+    
+    results = []
+    for feature_tuple, data in df_long.group_by(feature_col):
+        feature = feature_tuple[0]
+        g1_data = data.filter(pl.col(group_col) == group_1).get_column(value_col).to_numpy()
+        g2_data = data.filter(pl.col(group_col) == group_2).get_column(value_col).to_numpy()
         
         if len(g1_data) == 0 or len(g2_data) == 0:
-            return pl.DataFrame({'statistic': [np.nan], 'p_value': [np.nan]})
+            results.append((feature, np.nan, np.nan))
+            continue
             
-        stat, pval = sp_stats.mannwhitneyu(g1_data, g2_data, alternative='two-sided')
-        return pl.DataFrame({'statistic': [stat], 'p_value': [pval]})
+        try:
+            stat, pval = ss.mannwhitneyu(g1_data, g2_data, alternative='two-sided')
+            results.append((feature, stat, pval))
+        except ValueError:
+            results.append((feature, np.nan, np.nan))
 
-    results = df_filtered.group_by(feature_col).apply(_mw_helper) #type: ignore[arg-type]
-    return results.sort('p_value')
+    return pl.DataFrame(
+        results,
+        schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64}
+    ).sort("Feature")
 
-def fdr_correction(
-    pvalues: pl.Series,
-    method: str = 'fdr_bh'
-) -> pl.Series:
-    """
-    Applies False Discovery Rate correction to a Series of p-values.
 
-    Args:
-        pvalues: A Polars Series containing p-values.
-        method: Correction method (from statsmodels). 'fdr_bh' is default.
-
-    Returns:
-        A Polars Series containing the corrected p-values (q-values).
-    """
-    # 1. Create a DataFrame with original p-values and a row index
-    df = pvalues.to_frame().with_row_count("idx")
-    
-    # 2. Filter to get only non-null p-values and their original indices
-    df_filtered = df.filter(pl.col(pvalues.name).is_not_null())
-    
-    # 3. Extract p-values to correct
-    pvals_to_correct = df_filtered[pvalues.name].to_numpy()
-    
-    if len(pvals_to_correct) == 0:
-        # Handle empty or all-null input
-        return pl.Series(name="q_value", values=[None] * len(pvalues), dtype=pl.Float64)
-
-    # 4. Run FDR correction
-    reject, qvalues, _, _ = multipletests(
-        pvals_to_correct,
-        alpha=0.05,
-        method=method
-    )
-    
-    # 5. Add q-values back to the filtered DataFrame
-    df_filtered = df_filtered.with_columns(
-        pl.Series(name="q_value", values=qvalues)
-    )
-    
-    # 6. Join back to the original DataFrame to restore shape and nulls
-    df_final = df.join(
-        df_filtered.select(["idx", "q_value"]),
-        on="idx",
-        how="left"
-    )
-    
-    return df_final["q_value"]
-
-def cliffs_delta(
-    group1: np.ndarray,
-    group2: np.ndarray
-) -> float:
-    """
-    Calculates Cliff's Delta (d) effect size.
-
-    A 1-liner implementation.
-    - d = 0: No difference
-    - d = 1: Group 1 is 100% larger than Group 2
-    - d = -1: Group 2 is 100% larger than Group 1
-
-    Args:
-        group1: Numpy array for group 1.
-        group2: Numpy array for group 2.
-
-    Returns:
-        The Cliff's Delta effect size (float).
-    """
-    if len(group1) == 0 or len(group2) == 0:
+def cliffs_delta(g1: np.ndarray, g2: np.ndarray) -> float:
+    """Calculates Cliff's Delta effect size."""
+    if len(g1) == 0 or len(g2) == 0:
         return np.nan
         
-    # 1-liner calculation
-    return float (np.mean(np.sign(np.subtract.outer(group1, group2))))
+    n_gt = 0
+    n_lt = 0
+    for x in g1:
+        for y in g2:
+            if x > y:
+                n_gt += 1
+            elif x < y:
+                n_lt += 1
+                
+    return (n_gt - n_lt) / (len(g1) * len(g2))
+
+def fdr_correction(
+    p_values: pl.Series, 
+    method: str = 'fdr_bh',
+    alpha: float = 0.05
+) -> pl.Series:
+    """Applies FDR correction to a Polars Series of p-values."""
+    if p_values.is_empty():
+        return pl.Series("q_value", [], dtype=pl.Float64)
+        
+    mask_not_null = p_values.is_not_null()
+    
+    # Get non-null p-values for correction
+    pvals_to_correct = p_values.filter(mask_not_null).to_numpy()
+    
+    if len(pvals_to_correct) == 0:
+        return p_values.alias("q_value")
+
+    reject, qvals, _, _ = multipletests(
+        pvals_to_correct, alpha=alpha, method=method
+    )
+    
+    # Create a new series with nulls in the right places
+    qvals_full = pl.Series(
+        "q_value", 
+        np.full(len(p_values), np.nan), 
+        dtype=pl.Float64
+    )
+    
+    qvals_full = qvals_full.scatter(
+        mask_not_null.arg_true(), 
+        qvals
+    )
+    
+    return qvals_full

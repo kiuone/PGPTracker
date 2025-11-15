@@ -1,0 +1,31 @@
+name: Publish Package to PyPI
+
+on:
+  release:
+    types: [published] 
+
+jobs:
+  pypi-publish:
+    name: Upload release to PyPI
+    environment: pypi 
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write 
+      contents: read  
+      
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+          
+      - name: Install dependencies
+        run: pip install build twine 
+        
+      - name: Build sdist and wheel
+        run: python -m build 
+
+      - name: Publish package to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

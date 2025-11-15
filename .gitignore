@@ -201,6 +201,11 @@ cython_debug/
 .cursorignore
 .cursorindexingignore
 
+# Package Distribution
+dist/
+*.egg-info/
+build/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/
