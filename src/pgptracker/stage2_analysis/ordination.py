@@ -40,7 +40,7 @@ def run_pca(
     df_wide_N_D_clr: pl.DataFrame, 
     sample_id_col: str, 
     n_components: int = 2
-) -> Tuple[pl.DataFrame, SklearnPCA]:
+) -> Tuple[pl.DataFrame, pl.DataFrame, SklearnPCA]:
     """
     Performs PCA on an N×D CLR-transformed DataFrame.
     
@@ -52,8 +52,7 @@ def run_pca(
     Returns:
         Tuple: (Polars DataFrame of PC scores, fitted SklearnPCA model)
     """
-    matrix, sample_ids, _ = _prepare_skbio_matrix(df_wide_N_D_clr, sample_id_col)
-    
+    matrix, sample_ids, feature_ids = _prepare_skbio_matrix(df_wide_N_D_clr, sample_id_col)
     pca = SklearnPCA(n_components=n_components, random_state=42)
     scores = pca.fit_transform(matrix)
     
@@ -64,7 +63,12 @@ def run_pca(
         schema=col_names
     ).insert_column(0, pl.Series("Sample", sample_ids))
     
-    return df_scores, pca
+    # Create Loadings DataFrame (Vectors)
+    # Components shape is (n_components, n_features), so we transpose
+    loadings = pca.components_.T 
+    df_loadings = pl.DataFrame(loadings, schema=col_names).insert_column(0, pl.Series("Feature", feature_ids))
+    
+    return df_scores, df_loadings, pca
 
 def run_pcoa(distance_matrix: DistanceMatrix) -> OrdinationResults:
     """

@@ -233,7 +233,7 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     )
 
     params_group.add_argument(
-        "--tax-level",
+        "-l", "--tax-level",
         type=str,
         default="Genus",
         choices=['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'],

@@ -81,6 +81,16 @@ def apply_clr(
     elif input_format in ('wide', 'unstratified'):
         # --- Case 2: Wide Input (Deterministico) ---
         df_wide = pl.read_csv(input_path, separator="\t")
+
+        # Identify ID col for sanitization
+        target_id_col = wide_id_col
+        
+        # If the ID columns exists, we remove '|' to avoid errors in Tensor split
+        if target_id_col in df_wide.columns:
+             df_wide = df_wide.with_columns(
+                pl.col(target_id_col)
+                .cast(pl.String)
+                .str.replace_all(r"\|", "_")) # Substitute '|' with '_'
         
         if wide_orientation == "D_N":
             # Input is D×N (e.g., 'Lv3' | S1 | S2)
@@ -215,6 +225,11 @@ def _combine_feature_columns(
     if len(feature_cols) == 1:
         # Already single column, just rename
         return df.rename({feature_cols[0]: 'FeatureID'})
+    
+    # Remove any '|' characters in feature columns to avoid confusion and replace with '_'
+    df = df.with_columns([
+        pl.col(c).cast(pl.String).str.replace_all(r"\|", "_") 
+        for c in feature_cols])
     
     # Multiple feature columns - combine with '|' separator
     df = df.with_columns(

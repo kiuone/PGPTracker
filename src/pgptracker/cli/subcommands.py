@@ -589,5 +589,21 @@ def register_analysis_command(subparsers: argparse._SubParsersAction) -> None:
         help="Perplexity parameter for t-SNE (default: 30.0). "
              "Should be less than the number of samples."
     )
+
+    req_group.add_argument(
+        "--metadata-id-col",
+        default="#SampleID",  
+        metavar="NAME",
+        help="Name of the Sample ID column in the metadata file. "
+             "Will be renamed to 'Sample' to match the feature table. (default: #SampleID)"
+    )
+
+    norm_group.add_argument(
+        "--input-format",
+        choices=['wide', 'long', 'stratified', 'unstratified'],
+        default='wide',
+        help="Format of the input table. Use 'long' for stratified outputs. (default: wide)"
+        "Choices are: wide, long, stratified, unstratified."
+    )
     
     parser.set_defaults(func=analysis_command)

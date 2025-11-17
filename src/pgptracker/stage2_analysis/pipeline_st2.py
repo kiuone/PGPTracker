@@ -48,7 +48,7 @@ def run_stage2_pipeline(args: argparse.Namespace):
         # apply_clr returns paths to both RAW (NxD) and CLR (NxD) tables
         clr_outputs = apply_clr(
             input_path=input_table,
-            input_format="wide", # Default assumption for Stage 1 output
+            input_format=args.input_format, 
             output_dir=output_dir / "normalization",
             base_name="data",
             wide_orientation=args.orientation, # 'D_N' or 'N_D' from CLI
@@ -63,9 +63,19 @@ def run_stage2_pipeline(args: argparse.Namespace):
         # Load the NxD CLR table for Beta Diversity/Stats (normalized)
         clr_path = clr_outputs['clr_wide_N_D']
         df_clr = pl.read_csv(clr_path, separator="\t")
+
+        # Load metadata 
+        df_meta = pl.read_csv(input_metadata, separator="\t", infer_schema_length=10000)
         
-        # Load Metadata
-        df_meta = pl.read_csv(input_metadata, separator="\t")
+        # Normalize metadata ID column to 'Sample' to match our pipeline standard
+        if args.metadata_id_col != "Sample":
+            if args.metadata_id_col in df_meta.columns:
+                logger.info(f"Renaming metadata column '{args.metadata_id_col}' to 'Sample' for compatibility.")
+                df_meta = df_meta.rename({args.metadata_id_col: "Sample"})
+            else:
+                if "Sample" not in df_meta.columns:
+                    logger.error(f"Metadata ID column '{args.metadata_id_col}' not found in metadata file.")
+                    sys.exit(1)
         
         logger.info("Normalization complete.")
         
@@ -98,7 +108,7 @@ def run_stage2_pipeline(args: argparse.Namespace):
         
         # 2c. Ordination (PCA & t-SNE on CLR)
         logger.info("  -> Running Ordination...")
-        scores_pca, _ = run_pca(df_clr, 'Sample')
+        scores_pca, loadings_pca, _ = run_pca(df_clr, 'Sample')
         scores_tsne = run_tsne(
             df_clr.drop("Sample").to_numpy(), 
             df_clr["Sample"].to_list(), 
@@ -109,8 +119,8 @@ def run_stage2_pipeline(args: argparse.Namespace):
         scores_tsne.write_csv(div_dir / "tsne_scores.tsv", separator="\t")
         
         if args.group_col in df_meta.columns:
-            plot_ordination(scores_pca, df_meta, 'Sample', args.group_col, 
-                            title="PCA (Aitchison)", output_dir=div_dir, base_name="pca_plot")
+            plot_ordination(scores_pca, df_meta, 'Sample', args.group_col, df_loadings=loadings_pca,
+                            title="PCA Biplot (Aitchison)", output_dir=div_dir, base_name="pca_plot")
             plot_ordination(scores_tsne, df_meta, 'Sample', args.group_col, 
                             x_col="tSNE1", y_col="tSNE2",
                             title="t-SNE", output_dir=div_dir, base_name="tsne_plot")
