@@ -1,0 +1,1 @@
+{'method': 'PERMANOVA', 'formula': '~Treatment', 'p_value': np.float64(0.076), 'test_statistic': np.float64(176.17071444287188), 'permutations': 999}

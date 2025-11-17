@@ -119,7 +119,8 @@ def kruskal_wallis_test(
             
     return pl.DataFrame(
         results,
-        schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64}
+        schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64},
+        orient="row"
     ).sort("Feature")
 
 
@@ -165,9 +166,9 @@ def mann_whitney_u_test(
         except ValueError:
             results.append((feature, np.nan, np.nan))
 
-    return pl.DataFrame(
-        results,
-        schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64}
+    return pl.DataFrame(results, schema={"Feature": pl.String, 
+                         "test_statistic": pl.Float64, "p_value": pl.Float64},
+        orient="row"
     ).sort("Feature")
 
 

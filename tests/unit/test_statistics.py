@@ -74,7 +74,6 @@ class TestStatistics:
         res_p2 = results.filter(pl.col('Feature') == 'PGPT_2')
 
         assert res_p1['p_value'][0] == pytest.approx(0.1)
-        # **BUG FIX**: Updated p-value to match scipy's output
         assert res_p2['p_value'][0] == pytest.approx(0.4)
 
     @pytest.mark.parametrize("g1, g2, expected_delta", [
