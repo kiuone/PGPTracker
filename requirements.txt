@@ -29,8 +29,4 @@ pyyaml
 tqdm
 appdirs
 setuptools
-
-# Testing
-# pytest
-# pytest-cov
-# pytest-mock
+requests
