@@ -102,7 +102,7 @@ def run_test():
         "diversity/pca_scores.tsv",         # Confere Ordination
         "diversity/pca_plot.png",           # Confere Visualização
         "diversity/alpha_observed_features.png", # Confere Alpha
-        "statistics/kruskal_wallis_results.tsv", # Confere Stats
+        "statistics/differential_abundance_results.tsv", # Confere Stats
         "statistics/volcano_plot.png",
         "statistics/heatmap_significant.png",    # Confere Heatmap
         "machine_learning/random_forest_importance.tsv", # Confere ML

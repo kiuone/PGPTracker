@@ -169,6 +169,7 @@ def create_parser() -> argparse.ArgumentParser:
     subcommands.register_unstratify_pgpt_command(subparsers)
     # STAGE 2 SUBCOMMANDS 
     subcommands.register_clr_command(subparsers)
+    subcommands.register_analysis_command(subparsers)
     
     return parser
 

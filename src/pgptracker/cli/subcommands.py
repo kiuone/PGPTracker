@@ -25,6 +25,7 @@ from pgptracker.utils.env_manager import get_output_dir, get_threads
 from pgptracker.stage1_processing.unstrat_pgpt import generate_unstratified_pgpt
 from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
 from pgptracker.stage2_analysis.clr_normalize import apply_clr
+from pgptracker.stage2_analysis import pipeline_st2
 
 # Handler Functions (logic for each subcommand)
 def export_command(args: argparse.Namespace) -> int:
@@ -281,6 +282,20 @@ def clr_command(args: argparse.Namespace) -> int:
         print(f"\n[CLR ERROR] CLR transformation failed: {e}", file=sys.stderr)
         return 1
     
+def analysis_command(args: argparse.Namespace) -> int:
+    """
+    Handler for the 'analysis' subcommand (Stage 2).
+    """
+    # Fallback: if target_col is not set, use group_col
+    if args.run_ml and not args.target_col:
+        args.target_col = args.group_col
+    try:
+        pipeline_st2.run_stage2_pipeline(args)
+        return 0
+    except Exception as e:
+        print(f"[ERROR] Analysis pipeline failed: {e}")
+        return 1
+    
 parent_parser = argparse.ArgumentParser(add_help=False)
 parent_parser.add_argument(
     '--profile',
@@ -469,3 +484,110 @@ def register_clr_command(subparsers: argparse._SubParsersAction):
         help="Name of the abundance/value column (for 'long' format) (default: %(default)s)")
     
     clr_parser.set_defaults(func=clr_command)
+
+def register_analysis_command(subparsers: argparse._SubParsersAction) -> None:
+    """
+    Registers the 'analysis' subcommand arguments.
+    """
+    parser = subparsers.add_parser(
+        "analysis",
+        parents=[parent_parser], # Inclui --profile
+        help="Run Stage 2: Statistical Analysis & Machine Learning",
+        description="Performs CLR normalization, Diversity Analysis, "
+                    "Statistical Testing (KW/MWU), and Machine Learning (RF/Lasso)."
+    )
+    
+    # Required Inputs
+    req_group = parser.add_argument_group("required arguments")
+    req_group.add_argument(
+        "-i", "--input-table",
+        required=True,
+        metavar="PATH",
+        help="Path to the Feature Table (usually unstratified/stratified TSV from Stage 1)."
+    )
+    req_group.add_argument(
+        "-m", "--metadata",
+        required=True,
+        metavar="PATH",
+        help="Path to the Metadata TSV file."
+    )
+    
+    # Configuration
+    conf_group = parser.add_argument_group("configuration")
+    conf_group.add_argument(
+        "-o", "--output-dir",
+        default="results_stage2",
+        metavar="PATH",
+        help="Directory to save analysis results (default: results_stage2)"
+    )
+    conf_group.add_argument(
+        "--group-col",
+        required=True,
+        metavar="COL",
+        help="Metadata column to use for grouping (e.g., 'Treatment', 'Site'). "
+             "Used for plotting and statistical tests."
+    )
+    
+    # Normalization Config
+    norm_group = parser.add_argument_group("normalization options")
+    norm_group.add_argument(
+        "--orientation",
+        choices=['D_N', 'N_D'],
+        default='D_N',
+        help="Orientation of the input table. Stage 1 outputs are usually D_N (features x samples). "
+             "(default: D_N)"
+    )
+    norm_group.add_argument(
+        "--feature-col-name",
+        default="Lv3",
+        metavar="NAME",
+        help="Name of the Feature ID column in the input table (e.g., 'Lv3', 'FeatureID'). "
+             "(default: Lv3)"
+    )
+    
+    # Analysis Modules (Flags to DISABLE)
+    # By default, everything runs. User passes --no-X to disable.
+    mod_group = parser.add_argument_group("analysis modules")
+    
+    mod_group.add_argument(
+        "--no-stats",
+        dest="run_stats",
+        action="store_false",
+        default=True,
+        help="Skip Statistical Testing (Kruskal-Wallis / Mann-Whitney U)"
+    )
+    
+    mod_group.add_argument(
+        "--no-ml",
+        dest="run_ml",
+        action="store_false",
+        default=True,
+        help="Skip Machine Learning models (Random Forest / Lasso / Boruta)"
+    )
+    
+    # ML Specifics
+    ml_group = parser.add_argument_group("machine learning options")
+    ml_group.add_argument(
+        "--target-col",
+        metavar="COL",
+        default=None,
+        help="Metadata column to predict. Defaults to --group-col if not set."
+    )
+    ml_group.add_argument(
+        "--ml-type",
+        choices=['classification', 'regression'],
+        default='classification',
+        help="Type of Machine Learning task (default: classification)"
+    )
+    
+    # Advanced
+    adv_group = parser.add_argument_group("advanced options")
+    adv_group.add_argument(
+        "--tsne-perplexity",
+        type=float,
+        default=30.0,
+        help="Perplexity parameter for t-SNE (default: 30.0). "
+             "Should be less than the number of samples."
+    )
+    
+    parser.set_defaults(func=analysis_command)
