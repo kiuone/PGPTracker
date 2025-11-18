@@ -237,3 +237,5 @@ __pycache__/
 data/
 results/
 src/pgptracker/databases/2024.09.taxonomy.asv.tsv.qza
+test_run_new_unstrat2/
+test_run*/
