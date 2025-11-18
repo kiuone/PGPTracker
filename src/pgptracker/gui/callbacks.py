@@ -2,11 +2,14 @@
 
 import base64
 import io
+import logging
 import polars as pl
 from typing import List, Optional, Tuple
 from dash import callback, Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
 from pgptracker.gui import ids, plots
+
+logger = logging.getLogger(__name__)
 
 
 @callback(
@@ -14,7 +17,8 @@ from pgptracker.gui import ids, plots
         Output(ids.STORE_RAW_METADATA, "data"),
         Output(ids.DROPDOWN_SAMPLE_ID, "options")
     ],
-    Input(ids.UPLOAD_METADATA, "contents")
+    Input(ids.UPLOAD_METADATA, "contents"),
+    prevent_initial_call=True
 )
 def store_raw_metadata(metadata_content):
     """
@@ -27,26 +31,33 @@ def store_raw_metadata(metadata_content):
         Tuple of (metadata_json, dropdown_options)
     """
     if not metadata_content:
+        logger.warning("Metadata upload triggered but no content received")
         raise PreventUpdate
 
     try:
+        logger.info("Processing metadata upload")
         meta_decoded = base64.b64decode(metadata_content.split(",")[1])
         df_metadata = pl.read_csv(io.BytesIO(meta_decoded), separator="\t")
+
+        logger.info(f"Metadata loaded: {df_metadata.shape[0]} rows, {df_metadata.shape[1]} columns")
 
         metadata_json = df_metadata.to_pandas().to_json(orient="split")
 
         # Populate dropdown with all columns for manual selection if needed
         column_options = [{"label": col, "value": col} for col in df_metadata.columns]
 
+        logger.info(f"Metadata successfully stored with {len(column_options)} column options")
         return metadata_json, column_options
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to process metadata upload: {e}", exc_info=True)
         raise PreventUpdate
 
 
 @callback(
     Output(ids.STORE_RAW_CLR_DATA, "data"),
-    Input(ids.UPLOAD_CLR_DATA, "contents")
+    Input(ids.UPLOAD_CLR_DATA, "contents"),
+    prevent_initial_call=True
 )
 def store_raw_clr_data(clr_content):
     """
@@ -59,17 +70,23 @@ def store_raw_clr_data(clr_content):
         JSON string of CLR DataFrame
     """
     if not clr_content:
+        logger.warning("CLR data upload triggered but no content received")
         raise PreventUpdate
 
     try:
+        logger.info("Processing CLR data upload")
         clr_decoded = base64.b64decode(clr_content.split(",")[1])
         df_clr = pl.read_csv(io.BytesIO(clr_decoded), separator="\t")
 
+        logger.info(f"CLR data loaded: {df_clr.shape[0]} rows, {df_clr.shape[1]} columns")
+
         clr_json = df_clr.to_pandas().to_json(orient="split")
 
+        logger.info("CLR data successfully stored")
         return clr_json
 
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to process CLR data upload: {e}", exc_info=True)
         raise PreventUpdate
 
 
@@ -448,18 +465,50 @@ def update_main_container_theme(theme):
     base_style = {
         "marginLeft": "340px",
         "marginTop": "100px",
-        "padding": "20px"
+        "padding": "20px",
+        "minHeight": "calc(100vh - 100px)"
     }
 
     if theme == "dark":
         base_style.update({
-            "backgroundColor": "#1e1e1e",
-            "color": "#ffffff"
+            "backgroundColor": "#1E1E1E",
+            "color": "#CCCCCC"
         })
     else:
         base_style.update({
             "backgroundColor": "#ffffff",
-            "color": "#000000"
+            "color": "#212529"
+        })
+
+    return base_style
+
+
+@callback(
+    Output("app-container", "style"),
+    Input(ids.STORE_THEME, "data")
+)
+def update_app_container_theme(theme):
+    """
+    Update app container background for full viewport coverage.
+
+    Args:
+        theme: Current theme (light or dark)
+
+    Returns:
+        Style dict for app container
+    """
+    base_style = {
+        "padding": "0",
+        "minHeight": "100vh"
+    }
+
+    if theme == "dark":
+        base_style.update({
+            "backgroundColor": "#1E1E1E"
+        })
+    else:
+        base_style.update({
+            "backgroundColor": "#ffffff"
         })
 
     return base_style

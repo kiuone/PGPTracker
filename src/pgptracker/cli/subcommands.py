@@ -618,11 +618,28 @@ def gui_command(args: argparse.Namespace) -> int:
     Launches the Dash web application for interactive data exploration.
     """
     try:
+        import logging
         from pgptracker.gui import run_app
 
-        print("Starting PGPTracker GUI...")
-        print(f"Server will run on http://0.0.0.0:{args.port}")
-        print("Press Ctrl+C to stop the server")
+        # Configure logging based on verbosity
+        level = logging.INFO if args.verbose else logging.WARNING
+        logging.basicConfig(
+            level=level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+        # Suppress overly verbose Dash logs unless in verbose mode
+        if not args.verbose:
+            logging.getLogger('dash').setLevel(logging.WARNING)
+            logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
+        if args.verbose:
+            print("Starting PGPTracker GUI...")
+            print(f"Server will run on http://0.0.0.0:{args.port}")
+            print(f"Debug mode: {args.debug}")
+            print(f"Verbose logging: enabled")
+            print("Press Ctrl+C to stop the server")
 
         run_app(debug=args.debug, port=args.port)
         return 0
@@ -655,6 +672,12 @@ def register_gui_command(subparsers: argparse._SubParsersAction):
         "--debug",
         action="store_true",
         help="Run server in debug mode with auto-reload"
+    )
+
+    gui_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging (INFO level). Default: WARNING level for clean terminal."
     )
 
     gui_parser.set_defaults(func=gui_command)

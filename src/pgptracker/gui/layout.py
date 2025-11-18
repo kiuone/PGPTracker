@@ -157,6 +157,5 @@ def create_layout() -> dbc.Container:
             )
         ],
         fluid=True,
-        style={"padding": "0"},
         id="app-container"
     )
