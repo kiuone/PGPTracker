@@ -19,6 +19,8 @@ def create_layout() -> dbc.Container:
             dcc.Store(id=ids.STORE_DATA_N_D),
             dcc.Store(id=ids.STORE_METADATA_COLS),
             dcc.Store(id=ids.STORE_FEATURE_COLS),
+            dcc.Store(id=ids.STORE_RAW_METADATA),
+            dcc.Store(id=ids.STORE_RAW_CLR_DATA),
 
             # Header
             dbc.Row(

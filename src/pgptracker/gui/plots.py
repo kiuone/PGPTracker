@@ -31,6 +31,7 @@ def create_boxplot(
 
         Output: Boxplot with Treatment on X-axis, IAA_Synthesis_CLR on Y-axis
     """
+    # NOTE: Converting to Pandas because Plotly Express does not yet fully support Polars DataFrames natively.
     pdf = df.to_pandas()
 
     fig = px.box(
@@ -79,6 +80,7 @@ def create_scatter(
 
         Output: Scatter plot with PC1 on X, PC2 on Y, colored by Treatment
     """
+    # NOTE: Converting to Pandas because Plotly Express does not yet fully support Polars DataFrames natively.
     pdf = df.to_pandas()
 
     fig = px.scatter(

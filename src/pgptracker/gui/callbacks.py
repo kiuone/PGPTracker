@@ -3,9 +3,93 @@
 import base64
 import io
 import polars as pl
+from typing import List, Optional, Tuple
 from dash import callback, Input, Output, State, html, no_update
 from dash.exceptions import PreventUpdate
 from pgptracker.gui import ids, plots
+
+
+@callback(
+    [
+        Output(ids.STORE_RAW_METADATA, "data"),
+        Output(ids.DROPDOWN_SAMPLE_ID, "options")
+    ],
+    Input(ids.UPLOAD_METADATA, "contents")
+)
+def store_raw_metadata(metadata_content):
+    """
+    Store raw metadata and populate sample ID dropdown with all column names.
+
+    Args:
+        metadata_content: Base64 encoded metadata file content
+
+    Returns:
+        Tuple of (metadata_json, dropdown_options)
+    """
+    if not metadata_content:
+        raise PreventUpdate
+
+    try:
+        meta_decoded = base64.b64decode(metadata_content.split(",")[1])
+        df_metadata = pl.read_csv(io.BytesIO(meta_decoded), separator="\t")
+
+        metadata_json = df_metadata.to_pandas().to_json(orient="split")
+
+        # Populate dropdown with all columns for manual selection if needed
+        column_options = [{"label": col, "value": col} for col in df_metadata.columns]
+
+        return metadata_json, column_options
+
+    except Exception:
+        raise PreventUpdate
+
+
+@callback(
+    Output(ids.STORE_RAW_CLR_DATA, "data"),
+    Input(ids.UPLOAD_CLR_DATA, "contents")
+)
+def store_raw_clr_data(clr_content):
+    """
+    Store raw CLR data for merging.
+
+    Args:
+        clr_content: Base64 encoded CLR data file content
+
+    Returns:
+        JSON string of CLR DataFrame
+    """
+    if not clr_content:
+        raise PreventUpdate
+
+    try:
+        clr_decoded = base64.b64decode(clr_content.split(",")[1])
+        df_clr = pl.read_csv(io.BytesIO(clr_decoded), separator="\t")
+
+        clr_json = df_clr.to_pandas().to_json(orient="split")
+
+        return clr_json
+
+    except Exception:
+        raise PreventUpdate
+
+
+def _auto_detect_sample_column(columns: List[str]) -> Optional[str]:
+    """
+    Attempt to auto-detect sample ID column from common patterns.
+
+    Args:
+        columns: List of column names to search
+
+    Returns:
+        Detected column name or None if not found
+    """
+    common_patterns = ["Sample", "SampleID", "sample", "sampleID", "sample_id", "SAMPLE"]
+
+    for candidate in common_patterns:
+        if candidate in columns:
+            return candidate
+
+    return None
 
 
 @callback(
@@ -17,24 +101,39 @@ from pgptracker.gui import ids, plots
         Output(ids.DIV_DATA_SUMMARY, "children")
     ],
     [
-        Input(ids.UPLOAD_METADATA, "contents"),
-        Input(ids.UPLOAD_CLR_DATA, "contents")
+        Input(ids.STORE_RAW_METADATA, "data"),
+        Input(ids.STORE_RAW_CLR_DATA, "data"),
+        Input(ids.DROPDOWN_SAMPLE_ID, "value")
     ],
     [
         State(ids.UPLOAD_METADATA, "filename"),
         State(ids.UPLOAD_CLR_DATA, "filename")
     ]
 )
-def load_and_merge_data(metadata_content, clr_content, metadata_filename, clr_filename):
+def load_and_merge_data(
+    metadata_json,
+    clr_json,
+    selected_sample_col,
+    metadata_filename,
+    clr_filename
+):
     """
-    Load and merge metadata and CLR data files.
+    Merge metadata and CLR data with flexible sample ID column detection.
 
-    Triggered when either file is uploaded. Only processes when both files are available.
+    Uses auto-detection first. If that fails, requires manual selection via dropdown.
+    Handles large data serialization errors gracefully.
+
+    Args:
+        metadata_json: JSON string of metadata DataFrame
+        clr_json: JSON string of CLR DataFrame
+        selected_sample_col: User-selected sample column (or None for auto-detect)
+        metadata_filename: Name of uploaded metadata file
+        clr_filename: Name of uploaded CLR file
 
     Returns:
         Tuple of (merged_data_json, metadata_cols, feature_cols, status_div, summary_div)
     """
-    if not metadata_content or not clr_content:
+    if not metadata_json or not clr_json:
         status = html.Div(
             [
                 html.I(className="bi bi-info-circle me-2"),
@@ -45,26 +144,45 @@ def load_and_merge_data(metadata_content, clr_content, metadata_filename, clr_fi
         return None, None, None, status, ""
 
     try:
-        # Decode and load metadata
-        meta_decoded = base64.b64decode(metadata_content.split(",")[1])
-        df_metadata = pl.read_csv(io.BytesIO(meta_decoded), separator="\t")
+        import pandas as pd
 
-        # Decode and load CLR data
-        clr_decoded = base64.b64decode(clr_content.split(",")[1])
-        df_clr = pl.read_csv(io.BytesIO(clr_decoded), separator="\t")
+        # Load dataframes from stored JSON
+        df_metadata = pl.from_pandas(pd.read_json(metadata_json, orient="split"))
+        df_clr = pl.from_pandas(pd.read_json(clr_json, orient="split"))
 
-        # Identify sample column (flexible: "Sample" or "SampleID")
-        sample_col = None
-        for candidate in ["Sample", "SampleID", "sample", "sampleID"]:
-            if candidate in df_metadata.columns:
-                sample_col = candidate
-                break
+        # Determine sample column: use manual selection if provided, otherwise auto-detect
+        if selected_sample_col:
+            sample_col = selected_sample_col
+        else:
+            sample_col = _auto_detect_sample_column(df_metadata.columns)
 
+        # If auto-detection failed and no manual selection, prompt user
         if not sample_col:
-            raise ValueError("Metadata must contain 'Sample' or 'SampleID' column")
+            error_status = html.Div(
+                [
+                    html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
+                    html.Div([
+                        html.Strong("Sample ID column not detected."),
+                        html.Br(),
+                        "Please select the correct column from the '3. Sample ID Column' dropdown above."
+                    ])
+                ],
+                className="text-warning"
+            )
+            return None, None, None, error_status, ""
+
+        # Validate sample column exists in both datasets
+        if sample_col not in df_metadata.columns:
+            raise ValueError(
+                f"Selected column '{sample_col}' not found in metadata. "
+                f"Available columns: {', '.join(df_metadata.columns)}"
+            )
 
         if sample_col not in df_clr.columns:
-            raise ValueError(f"CLR data must contain '{sample_col}' column")
+            raise ValueError(
+                f"Selected column '{sample_col}' not found in CLR data. "
+                f"Available columns: {', '.join(df_clr.columns)}"
+            )
 
         # Merge datasets
         df_merged = df_clr.join(df_metadata, on=sample_col, how="inner")
@@ -88,6 +206,13 @@ def load_and_merge_data(metadata_content, clr_content, metadata_filename, clr_fi
                         f"CLR Data: {clr_filename}"
                     ],
                     className="mt-2"
+                ),
+                html.Div(
+                    [
+                        html.I(className="bi bi-check-circle-fill text-success me-2"),
+                        f"Sample ID Column: {sample_col}"
+                    ],
+                    className="mt-2"
                 )
             ]
         )
@@ -104,8 +229,24 @@ def load_and_merge_data(metadata_content, clr_content, metadata_filename, clr_fi
             ]
         )
 
-        # Convert to JSON for storage
-        merged_json = df_merged.to_pandas().to_json(orient="split")
+        # Convert to JSON for storage with error handling for large datasets
+        try:
+            merged_json = df_merged.to_pandas().to_json(orient="split")
+        except (MemoryError, ValueError) as e:
+            error_status = html.Div(
+                [
+                    html.I(className="bi bi-exclamation-triangle-fill text-danger me-2"),
+                    html.Div([
+                        html.Strong("Dataset too large for browser storage."),
+                        html.Br(),
+                        f"Error: {str(e)}",
+                        html.Br(),
+                        "Please filter your data to reduce size or use command-line tools."
+                    ])
+                ],
+                className="text-danger"
+            )
+            return None, None, None, error_status, ""
 
         return merged_json, metadata_cols, feature_cols, status, summary
 

@@ -79,6 +79,26 @@ def create_sidebar() -> html.Div:
 
             dbc.Card(
                 [
+                    dbc.CardHeader(html.H5("3. Sample ID Column")),
+                    dbc.CardBody(
+                        [
+                            html.P(
+                                "Auto-detected or select manually if needed:",
+                                className="small text-muted mb-2"
+                            ),
+                            dcc.Dropdown(
+                                id=ids.DROPDOWN_SAMPLE_ID,
+                                placeholder="Auto-detect or select...",
+                                clearable=True
+                            )
+                        ]
+                    )
+                ],
+                className="mb-3"
+            ),
+
+            dbc.Card(
+                [
                     dbc.CardHeader(html.H5("Upload Status")),
                     dbc.CardBody(id=ids.DIV_UPLOAD_STATUS)
                 ],
