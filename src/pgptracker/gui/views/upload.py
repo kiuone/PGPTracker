@@ -11,10 +11,17 @@ from pgptracker.gui import utils
 def auto_load_from_directory(results_dir: Path):
     """
     Automatically load CLR data and metadata from results directory.
+    Stores data in session state without displaying messages.
 
     Args:
         results_dir: Path to pipeline results directory
     """
+    # Only load once
+    if st.session_state.get('auto_load_attempted', False):
+        return
+
+    st.session_state.auto_load_attempted = True
+
     # Look for expected files
     clr_file = results_dir / "clr_wide_N_D.tsv"
     metadata_file = results_dir / "metadata.tsv"
@@ -28,9 +35,10 @@ def auto_load_from_directory(results_dir: Path):
             # Auto-detect sample column
             metadata_sample_col = utils.auto_detect_sample_column(df_metadata.columns)
             if not metadata_sample_col:
-                # Let user select manually
+                # Store for manual selection
                 st.session_state.pending_metadata = df_metadata
                 st.session_state.pending_clr = df_clr
+                st.session_state.auto_load_status = "needs_manual_selection"
                 return
 
             # Merge data
@@ -46,12 +54,12 @@ def auto_load_from_directory(results_dir: Path):
             st.session_state.n_features = len(feature_cols)
             st.session_state.n_metadata_cols = len(metadata_cols)
             st.session_state.data_loaded = True
-
-            st.success(f"✅ Auto-loaded data from {results_dir}")
-            st.info(f"📊 {df_merged.shape[0]} samples × {df_merged.shape[1]} total columns")
+            st.session_state.auto_load_status = "success"
 
         except Exception as e:
-            st.error(f"Failed to auto-load data: {e}")
+            st.session_state.auto_load_status = f"error: {e}"
+    else:
+        st.session_state.auto_load_status = "files_not_found"
 
 
 def render():
@@ -62,6 +70,17 @@ def render():
     # Show auto-load status
     if st.session_state.get('results_dir'):
         st.info(f"📂 Results directory: `{st.session_state.results_dir}`")
+
+        # Display auto-load status messages
+        auto_status = st.session_state.get('auto_load_status')
+        if auto_status == "success":
+            st.success(f"✅ Auto-loaded data from results directory")
+        elif auto_status == "files_not_found":
+            st.warning("⚠️ Expected files (clr_wide_N_D.tsv, metadata.tsv) not found in results directory")
+        elif auto_status and auto_status.startswith("error:"):
+            st.error(f"❌ {auto_status}")
+        elif auto_status == "needs_manual_selection":
+            st.info("ℹ️ Sample ID column could not be auto-detected. Please select manually below.")
 
     # Check if data already loaded
     if st.session_state.get('data_loaded', False):

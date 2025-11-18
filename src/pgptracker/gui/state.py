@@ -37,3 +37,10 @@ def init_session_state():
     # Results directory (if auto-loaded)
     if 'results_dir' not in st.session_state:
         st.session_state.results_dir = None
+
+    # Auto-load tracking
+    if 'auto_load_attempted' not in st.session_state:
+        st.session_state.auto_load_attempted = False
+
+    if 'auto_load_status' not in st.session_state:
+        st.session_state.auto_load_status = None

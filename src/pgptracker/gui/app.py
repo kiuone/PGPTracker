@@ -37,11 +37,14 @@ def main():
 
     # Check for auto-load directory from command line
     if len(sys.argv) > 1:
-        results_dir = Path(sys.argv[1])
-        if results_dir.exists():
+        results_dir_str = sys.argv[1]
+        results_dir = Path(results_dir_str)
+        if results_dir.exists() and results_dir.is_dir():
             st.session_state.results_dir = results_dir
             # Try to auto-load files
             upload.auto_load_from_directory(results_dir)
+        else:
+            st.warning(f"⚠️ Provided path does not exist or is not a directory: {results_dir_str}")
 
     # Sidebar navigation
     with st.sidebar:

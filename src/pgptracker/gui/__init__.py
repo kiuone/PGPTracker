@@ -15,7 +15,7 @@ def run_app(results_dir=None, port=8501):
     Launch the Streamlit GUI.
 
     Args:
-        results_dir: Optional path to results directory for auto-loading
+        results_dir: Optional path (str or Path) to results directory for auto-loading
         port: Port to run Streamlit server on (default: 8501)
     """
     # Get path to app.py
@@ -31,6 +31,10 @@ def run_app(results_dir=None, port=8501):
 
     # Add results directory if provided
     if results_dir:
+        # Convert to Path if string
+        if isinstance(results_dir, str):
+            results_dir = Path(results_dir)
+        cmd.append("--")  # Streamlit separator for script arguments
         cmd.append(str(results_dir))
 
     # Run streamlit

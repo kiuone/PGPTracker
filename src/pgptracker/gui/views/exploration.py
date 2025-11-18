@@ -145,6 +145,9 @@ def render():
     st.markdown("---")
     st.markdown("### 📄 Full Data Table")
 
+    # Initialize with full data
+    df_filtered = df_pandas
+
     # Add filters
     with st.expander("🔎 Filter Data"):
         filter_col = st.selectbox("Filter by column:", options=metadata_cols + feature_cols)
@@ -174,8 +177,6 @@ def render():
             ]
 
         st.info(f"Showing {len(df_filtered)} / {len(df_pandas)} samples")
-    else:
-        df_filtered = df_pandas
 
     # Display table
     st.dataframe(
