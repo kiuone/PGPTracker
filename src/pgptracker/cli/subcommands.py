@@ -605,5 +605,52 @@ def register_analysis_command(subparsers: argparse._SubParsersAction) -> None:
         help="Format of the input table. Use 'long' for stratified outputs. (default: wide)"
         "Choices are: wide, long, stratified, unstratified."
     )
-    
+
     parser.set_defaults(func=analysis_command)
+
+def gui_command(args: argparse.Namespace) -> int:
+    """
+    Handler for the 'gui' subcommand.
+    Launches the Dash web application for interactive data exploration.
+    """
+    try:
+        from pgptracker.gui import run_app
+
+        print("Starting PGPTracker GUI...")
+        print(f"Server will run on http://0.0.0.0:{args.port}")
+        print("Press Ctrl+C to stop the server")
+
+        run_app(debug=args.debug, port=args.port)
+        return 0
+    except ImportError as e:
+        print(f"[ERROR] GUI dependencies not installed: {e}", file=sys.stderr)
+        print("Install with: pip install dash dash-bootstrap-components dash-ag-grid", file=sys.stderr)
+        return 1
+    except Exception as e:
+        print(f"[ERROR] GUI launch failed: {e}", file=sys.stderr)
+        return 1
+
+def register_gui_command(subparsers: argparse._SubParsersAction):
+    """Registers the 'gui' subcommand."""
+    gui_parser = subparsers.add_parser(
+        "gui",
+        help="Launch interactive GUI for Stage 2 data exploration",
+        description="Launch the PGPTracker Stage 2 Data Explorer web interface. "
+                    "Use this to interactively explore CLR-transformed feature tables and metadata."
+    )
+
+    gui_parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        metavar="PORT",
+        help="Port number for the web server (default: 8050)"
+    )
+
+    gui_parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Run server in debug mode with auto-reload"
+    )
+
+    gui_parser.set_defaults(func=gui_command)

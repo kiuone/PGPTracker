@@ -6,6 +6,7 @@ STORE_METADATA_COLS = "store-metadata-cols"
 STORE_FEATURE_COLS = "store-feature-cols"
 STORE_RAW_METADATA = "store-raw-metadata"
 STORE_RAW_CLR_DATA = "store-raw-clr-data"
+STORE_THEME = "store-theme"
 
 # File upload components
 UPLOAD_METADATA = "upload-metadata"
@@ -17,6 +18,9 @@ DIV_DATA_SUMMARY = "div-data-summary"
 
 # Sample ID column selector (fallback when auto-detection fails)
 DROPDOWN_SAMPLE_ID = "dropdown-sample-id"
+
+# Theme toggle
+BTN_THEME_TOGGLE = "btn-theme-toggle"
 
 # Data explorer tab
 TABLE_DATA_EXPLORER = "table-data-explorer"
@@ -33,3 +37,6 @@ GRAPH_SCATTER = "graph-scatter"
 
 # Tabs
 TABS_MAIN = "tabs-main"
+
+# Main container
+MAIN_CONTAINER = "main-container"

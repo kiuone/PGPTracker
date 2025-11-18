@@ -15,35 +15,57 @@ def create_layout() -> dbc.Container:
     """
     return dbc.Container(
         [
-            # Hidden stores for data
+            # Hidden stores for data and theme
             dcc.Store(id=ids.STORE_DATA_N_D),
             dcc.Store(id=ids.STORE_METADATA_COLS),
             dcc.Store(id=ids.STORE_FEATURE_COLS),
             dcc.Store(id=ids.STORE_RAW_METADATA),
             dcc.Store(id=ids.STORE_RAW_CLR_DATA),
+            dcc.Store(id=ids.STORE_THEME, data="light"),
 
-            # Header
+            # Header with theme toggle
             dbc.Row(
                 dbc.Col(
                     html.Div(
                         [
-                            html.H2("PGPTracker Stage 2 Data Explorer", className="mb-0"),
-                            html.P(
-                                "Interactive exploration of CLR-transformed feature tables",
-                                className="text-muted mb-0"
+                            html.Div(
+                                [
+                                    html.Div(
+                                        [
+                                            html.H2("PGPTracker Stage 2 Data Explorer", className="mb-0"),
+                                            html.P(
+                                                "Interactive exploration of CLR-transformed feature tables",
+                                                className="text-muted mb-0 mt-1"
+                                            )
+                                        ]
+                                    ),
+                                    html.Div(
+                                        dbc.Button(
+                                            html.I(className="bi bi-moon-fill"),
+                                            id=ids.BTN_THEME_TOGGLE,
+                                            color="light",
+                                            size="sm",
+                                            className="theme-toggle-btn"
+                                        ),
+                                        className="d-flex align-items-center"
+                                    )
+                                ],
+                                className="d-flex justify-content-between align-items-center p-3"
                             )
                         ],
-                        className="p-3 bg-primary text-white"
+                        className="bg-primary text-white",
+                        style={"position": "relative", "zIndex": "10"}
                     ),
                     width=12
                 ),
-                className="mb-4"
+                className="mb-4",
+                style={"position": "relative"}
             ),
 
             # Sidebar
             components.create_sidebar(),
 
-            # Main content area (offset for sidebar)
+            # Main content area (offset for sidebar and header)
             html.Div(
                 [
                     dbc.Tabs(
@@ -127,11 +149,14 @@ def create_layout() -> dbc.Container:
                     )
                 ],
                 style={
-                    "margin-left": "340px",
+                    "marginLeft": "340px",
+                    "marginTop": "100px",
                     "padding": "20px"
-                }
+                },
+                id=ids.MAIN_CONTAINER
             )
         ],
         fluid=True,
-        style={"padding": "0"}
+        style={"padding": "0"},
+        id="app-container"
     )

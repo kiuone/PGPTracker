@@ -65,16 +65,28 @@ def create_sidebar() -> html.Div:
         [
             html.H4("Data Input", className="mb-4"),
 
-            create_upload_card(
-                card_title="1. Upload Metadata",
-                upload_id=ids.UPLOAD_METADATA,
-                upload_text="Drag and drop or click to upload metadata.tsv"
+            dcc.Loading(
+                id="loading-metadata",
+                type="circle",
+                children=[
+                    create_upload_card(
+                        card_title="1. Upload Metadata",
+                        upload_id=ids.UPLOAD_METADATA,
+                        upload_text="Drag and drop or click to upload metadata.tsv"
+                    )
+                ]
             ),
 
-            create_upload_card(
-                card_title="2. Upload CLR Data",
-                upload_id=ids.UPLOAD_CLR_DATA,
-                upload_text="Drag and drop or click to upload clr_wide_N_D.tsv"
+            dcc.Loading(
+                id="loading-clr",
+                type="circle",
+                children=[
+                    create_upload_card(
+                        card_title="2. Upload CLR Data",
+                        upload_id=ids.UPLOAD_CLR_DATA,
+                        upload_text="Drag and drop or click to upload clr_wide_N_D.tsv"
+                    )
+                ]
             ),
 
             dbc.Card(
@@ -114,13 +126,14 @@ def create_sidebar() -> html.Div:
         ],
         style={
             "position": "fixed",
-            "top": "70px",
+            "top": "120px",
             "left": "0",
             "bottom": "0",
             "width": "320px",
             "padding": "20px",
-            "background-color": "#f8f9fa",
-            "overflow-y": "auto"
+            "backgroundColor": "#f8f9fa",
+            "overflowY": "auto",
+            "zIndex": "100"
         }
     )
 

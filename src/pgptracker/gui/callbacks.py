@@ -342,10 +342,11 @@ def populate_dropdowns(metadata_cols, feature_cols, merged_data_json):
     [
         Input(ids.DROPDOWN_GROUPBY, "value"),
         Input(ids.DROPDOWN_FEATURE, "value"),
-        Input(ids.STORE_DATA_N_D, "data")
+        Input(ids.STORE_DATA_N_D, "data"),
+        Input(ids.STORE_THEME, "data")
     ]
 )
-def update_boxplot(group_col, feature_col, merged_data_json):
+def update_boxplot(group_col, feature_col, merged_data_json, theme):
     """
     Update boxplot based on selected group and feature.
 
@@ -353,6 +354,7 @@ def update_boxplot(group_col, feature_col, merged_data_json):
         group_col: Selected grouping column
         feature_col: Selected feature column
         merged_data_json: JSON string of merged DataFrame
+        theme: Current theme (light or dark)
 
     Returns:
         Plotly Figure object
@@ -364,7 +366,8 @@ def update_boxplot(group_col, feature_col, merged_data_json):
     df_pandas = pd.read_json(merged_data_json, orient="split")
     df = pl.from_pandas(df_pandas)
 
-    return plots.create_boxplot(df, feature_col, group_col)
+    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
+    return plots.create_boxplot(df, feature_col, group_col, theme=plotly_theme)
 
 
 @callback(
@@ -373,10 +376,11 @@ def update_boxplot(group_col, feature_col, merged_data_json):
         Input(ids.DROPDOWN_SCATTER_X, "value"),
         Input(ids.DROPDOWN_SCATTER_Y, "value"),
         Input(ids.DROPDOWN_GROUPBY, "value"),
-        Input(ids.STORE_DATA_N_D, "data")
+        Input(ids.STORE_DATA_N_D, "data"),
+        Input(ids.STORE_THEME, "data")
     ]
 )
-def update_scatter(x_col, y_col, color_col, merged_data_json):
+def update_scatter(x_col, y_col, color_col, merged_data_json, theme):
     """
     Update scatter plot based on selected X, Y, and color columns.
 
@@ -385,6 +389,7 @@ def update_scatter(x_col, y_col, color_col, merged_data_json):
         y_col: Selected Y-axis column
         color_col: Selected color grouping column
         merged_data_json: JSON string of merged DataFrame
+        theme: Current theme (light or dark)
 
     Returns:
         Plotly Figure object
@@ -396,4 +401,65 @@ def update_scatter(x_col, y_col, color_col, merged_data_json):
     df_pandas = pd.read_json(merged_data_json, orient="split")
     df = pl.from_pandas(df_pandas)
 
-    return plots.create_scatter(df, x_col, y_col, color_col)
+    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
+    return plots.create_scatter(df, x_col, y_col, color_col, theme=plotly_theme)
+
+
+@callback(
+    [
+        Output(ids.STORE_THEME, "data"),
+        Output(ids.BTN_THEME_TOGGLE, "children")
+    ],
+    Input(ids.BTN_THEME_TOGGLE, "n_clicks"),
+    State(ids.STORE_THEME, "data"),
+    prevent_initial_call=True
+)
+def toggle_theme(n_clicks, current_theme):
+    """
+    Toggle between light and dark themes.
+
+    Args:
+        n_clicks: Number of button clicks
+        current_theme: Current theme state
+
+    Returns:
+        Tuple of (new_theme, button_icon)
+    """
+    if current_theme == "light":
+        return "dark", html.I(className="bi bi-sun-fill")
+    else:
+        return "light", html.I(className="bi bi-moon-fill")
+
+
+@callback(
+    Output(ids.MAIN_CONTAINER, "style"),
+    Input(ids.STORE_THEME, "data")
+)
+def update_main_container_theme(theme):
+    """
+    Update main container styling based on theme.
+
+    Args:
+        theme: Current theme (light or dark)
+
+    Returns:
+        Style dict for main container
+    """
+    base_style = {
+        "marginLeft": "340px",
+        "marginTop": "100px",
+        "padding": "20px"
+    }
+
+    if theme == "dark":
+        base_style.update({
+            "backgroundColor": "#1e1e1e",
+            "color": "#ffffff"
+        })
+    else:
+        base_style.update({
+            "backgroundColor": "#ffffff",
+            "color": "#000000"
+        })
+
+    return base_style
