@@ -42,7 +42,12 @@ def store_raw_metadata(metadata_content, filename):
     try:
         logger.info(f"Processing metadata upload: {filename}")
         meta_decoded = base64.b64decode(metadata_content.split(",")[1])
-        df_metadata = pl.read_csv(io.BytesIO(meta_decoded), separator="\t")
+        df_metadata = pl.read_csv(
+            io.BytesIO(meta_decoded),
+            separator="\t",
+            infer_schema_length=None,  # Scan entire file to avoid type inference errors
+            null_values=["NA", "nan", "null", ""]  # Handle common null representations
+        )
 
         logger.info(f"Metadata loaded: {df_metadata.shape[0]} rows, {df_metadata.shape[1]} columns")
 
@@ -86,7 +91,12 @@ def store_raw_clr_data(clr_content, filename):
     try:
         logger.info(f"Processing CLR data upload: {filename}")
         clr_decoded = base64.b64decode(clr_content.split(",")[1])
-        df_clr = pl.read_csv(io.BytesIO(clr_decoded), separator="\t")
+        df_clr = pl.read_csv(
+            io.BytesIO(clr_decoded),
+            separator="\t",
+            infer_schema_length=None,  # Scan entire file to avoid type inference errors
+            null_values=["NA", "nan", "null", ""]  # Handle common null representations
+        )
 
         logger.info(f"CLR data loaded: {df_clr.shape[0]} rows, {df_clr.shape[1]} columns")
 
