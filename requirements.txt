@@ -30,8 +30,4 @@ tqdm
 appdirs
 setuptools
 psutil
-
-# Testing
-# pytest
-# pytest-cov
-# pytest-mock
+requests
