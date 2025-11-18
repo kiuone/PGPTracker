@@ -605,7 +605,11 @@ def register_analysis_command(subparsers: argparse._SubParsersAction) -> None:
         help="Format of the input table. Use 'long' for stratified outputs. (default: wide)"
         "Choices are: wide, long, stratified, unstratified."
     )
-
+    adv_group.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable detailed logging info (default: only warnings/errors shown)."
+    )
     parser.set_defaults(func=analysis_command)
 
 def gui_command(args: argparse.Namespace) -> int:
