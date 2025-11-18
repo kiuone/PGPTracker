@@ -9,7 +9,8 @@ from typing import Optional
 def create_boxplot(
     df: pl.DataFrame,
     feature_col: str,
-    group_col: str
+    group_col: str,
+    theme: str = "plotly_white"
 ) -> go.Figure:
     """
     Create a boxplot showing feature distribution across groups.
@@ -18,6 +19,7 @@ def create_boxplot(
         df: DataFrame containing feature and group data
         feature_col: Column name of the feature to plot on Y-axis
         group_col: Column name of the grouping variable for X-axis
+        theme: Plotly template to use (default: plotly_white)
 
     Returns:
         Plotly Figure object
@@ -47,7 +49,7 @@ def create_boxplot(
         xaxis_title=group_col,
         yaxis_title=feature_col,
         showlegend=True,
-        template="plotly_white",
+        template=theme,
         height=500
     )
 
@@ -58,7 +60,8 @@ def create_scatter(
     df: pl.DataFrame,
     x_col: str,
     y_col: str,
-    color_col: Optional[str] = None
+    color_col: Optional[str] = None,
+    theme: str = "plotly_white"
 ) -> go.Figure:
     """
     Create a scatter plot with optional color grouping.
@@ -68,6 +71,7 @@ def create_scatter(
         x_col: Column name for X-axis
         y_col: Column name for Y-axis
         color_col: Optional column name for color grouping
+        theme: Plotly template to use (default: plotly_white)
 
     Returns:
         Plotly Figure object
@@ -95,7 +99,7 @@ def create_scatter(
     fig.update_layout(
         xaxis_title=x_col,
         yaxis_title=y_col,
-        template="plotly_white",
+        template=theme,
         height=500,
         showlegend=True if color_col else False
     )
