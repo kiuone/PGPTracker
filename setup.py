@@ -17,11 +17,14 @@ if requirements_file.exists():
     requirements = [
         line.strip() 
         for line in requirements_file.read_text().splitlines()
-        if line.strip() and not line.startswith("#")]
+        if line.strip() and not line.startswith("#")
+    ]
 
 setup(
     name="pgptracker",
-    version="0.1.0",
+
+    use_scm_version=True, 
+    
     author="Vivian Mello",
     author_email="vmellomasc@gmail.com",
     description="Integration of soil metagenomic data for correlation of microbial markers with plant biochemical indicators",
@@ -30,6 +33,9 @@ setup(
     url="https://github.com/kiuone/PGPTracker",
     package_dir={'': 'src'},
     packages=find_packages(where='src', exclude=["tests", "tests.*"]),
+
+    include_package_data=True, 
+    
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Science/Research",
@@ -58,6 +64,7 @@ setup(
             "pgptracker=pgptracker.cli.cli:main",
         ],
     },
+
     package_data={
         "pgptracker": ["databases/*.txt",
                        "environments/*.yml"],
