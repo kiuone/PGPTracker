@@ -396,14 +396,15 @@ def update_boxplot(group_col, feature_col, merged_data_json, theme):
     Returns:
         Plotly Figure object
     """
+    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
+
     if not merged_data_json or not group_col or not feature_col:
-        return plots.create_empty_figure("Select both Group and Feature to display plot")
+        return plots.create_empty_figure("Select both Group and Feature to display plot", theme=plotly_theme)
 
     import pandas as pd
     df_pandas = pd.read_json(merged_data_json, orient="split")
     df = pl.from_pandas(df_pandas)
 
-    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
     return plots.create_boxplot(df, feature_col, group_col, theme=plotly_theme)
 
 
@@ -431,14 +432,15 @@ def update_scatter(x_col, y_col, color_col, merged_data_json, theme):
     Returns:
         Plotly Figure object
     """
+    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
+
     if not merged_data_json or not x_col or not y_col:
-        return plots.create_empty_figure("Select both X and Y axes to display plot")
+        return plots.create_empty_figure("Select both X and Y axes to display plot", theme=plotly_theme)
 
     import pandas as pd
     df_pandas = pd.read_json(merged_data_json, orient="split")
     df = pl.from_pandas(df_pandas)
 
-    plotly_theme = "plotly_dark" if theme == "dark" else "plotly_white"
     return plots.create_scatter(df, x_col, y_col, color_col, theme=plotly_theme)
 
 

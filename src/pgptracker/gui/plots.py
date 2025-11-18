@@ -45,13 +45,22 @@ def create_boxplot(
         title=f"Distribution of {feature_col} by {group_col}"
     )
 
-    fig.update_layout(
-        xaxis_title=group_col,
-        yaxis_title=feature_col,
-        showlegend=True,
-        template=theme,
-        height=500
-    )
+    # Set explicit background colors for dark mode
+    layout_updates = {
+        "xaxis_title": group_col,
+        "yaxis_title": feature_col,
+        "showlegend": True,
+        "template": theme,
+        "height": 500
+    }
+
+    if theme == "plotly_dark":
+        layout_updates.update({
+            "paper_bgcolor": "#252526",  # Match sidebar dark background
+            "plot_bgcolor": "#1E1E1E"    # Match main container dark background
+        })
+
+    fig.update_layout(**layout_updates)
 
     return fig
 
@@ -96,30 +105,43 @@ def create_scatter(
         title=f"{y_col} vs {x_col}"
     )
 
-    fig.update_layout(
-        xaxis_title=x_col,
-        yaxis_title=y_col,
-        template=theme,
-        height=500,
-        showlegend=True if color_col else False
-    )
+    # Set explicit background colors for dark mode
+    layout_updates = {
+        "xaxis_title": x_col,
+        "yaxis_title": y_col,
+        "template": theme,
+        "height": 500,
+        "showlegend": True if color_col else False
+    }
+
+    if theme == "plotly_dark":
+        layout_updates.update({
+            "paper_bgcolor": "#252526",  # Match sidebar dark background
+            "plot_bgcolor": "#1E1E1E"    # Match main container dark background
+        })
+
+    fig.update_layout(**layout_updates)
 
     fig.update_traces(marker=dict(size=10, opacity=0.7))
 
     return fig
 
 
-def create_empty_figure(message: str = "No data available") -> go.Figure:
+def create_empty_figure(message: str = "No data available", theme: str = "plotly_white") -> go.Figure:
     """
     Create an empty figure with a centered message.
 
     Args:
         message: Text to display in the empty figure
+        theme: Plotly template to use (default: plotly_white)
 
     Returns:
         Plotly Figure object with annotation
     """
     fig = go.Figure()
+
+    # Adjust text color based on theme
+    text_color = "#CCCCCC" if theme == "plotly_dark" else "gray"
 
     fig.add_annotation(
         text=message,
@@ -128,14 +150,23 @@ def create_empty_figure(message: str = "No data available") -> go.Figure:
         x=0.5,
         y=0.5,
         showarrow=False,
-        font=dict(size=16, color="gray")
+        font=dict(size=16, color=text_color)
     )
 
-    fig.update_layout(
-        xaxis=dict(visible=False),
-        yaxis=dict(visible=False),
-        template="plotly_white",
-        height=500
-    )
+    # Set explicit background colors for dark mode
+    layout_updates = {
+        "xaxis": dict(visible=False),
+        "yaxis": dict(visible=False),
+        "template": theme,
+        "height": 500
+    }
+
+    if theme == "plotly_dark":
+        layout_updates.update({
+            "paper_bgcolor": "#252526",
+            "plot_bgcolor": "#1E1E1E"
+        })
+
+    fig.update_layout(**layout_updates)
 
     return fig
