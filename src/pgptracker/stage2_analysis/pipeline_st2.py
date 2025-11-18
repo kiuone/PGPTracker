@@ -22,12 +22,18 @@ from pgptracker.stage2_analysis.visualizations import (
 
 # Setup Logger
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def run_stage2_pipeline(args: argparse.Namespace):
     """
     Main orchestrator for Stage 2: Analysis & Statistical Modeling.
     """
+    log_level = logging.INFO if args.verbose else logging.WARNING
+    
+    logging.basicConfig(
+        level=log_level, 
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        force=True)
+    
     logger.info("Starting Stage 2 Pipeline: Analysis & Modeling")
     
     # 0. Setup Paths
