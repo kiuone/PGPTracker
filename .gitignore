@@ -237,3 +237,4 @@ __pycache__/
 data/
 results/
 src/pgptracker/databases/2024.09.taxonomy.asv.tsv.qza
+test_run*/
