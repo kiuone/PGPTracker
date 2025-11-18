@@ -97,7 +97,8 @@ def create_layout() -> dbc.Container:
                                                     "pagination": True,
                                                     "paginationPageSize": 50
                                                 },
-                                                style={"height": "600px"}
+                                                style={"height": "600px"},
+                                                className="ag-theme-alpine"
                                             )
                                         ],
                                         className="p-3"
@@ -148,12 +149,8 @@ def create_layout() -> dbc.Container:
                         active_tab="tab-explorer"
                     )
                 ],
-                style={
-                    "marginLeft": "340px",
-                    "marginTop": "100px",
-                    "padding": "20px"
-                },
                 id=ids.MAIN_CONTAINER
+                # Style controlled by update_main_container_theme callback in callbacks.py
             )
         ],
         fluid=True,

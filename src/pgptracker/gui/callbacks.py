@@ -15,7 +15,8 @@ logger = logging.getLogger(__name__)
 @callback(
     [
         Output(ids.STORE_RAW_METADATA, "data"),
-        Output(ids.DROPDOWN_SAMPLE_ID, "options")
+        Output(ids.DROPDOWN_SAMPLE_ID, "options"),
+        Output(ids.UPLOAD_METADATA, "children")
     ],
     Input(ids.UPLOAD_METADATA, "contents"),
     State(ids.UPLOAD_METADATA, "filename"),
@@ -56,8 +57,25 @@ def store_raw_metadata(metadata_content, filename):
         # Populate dropdown with all columns for manual selection if needed
         column_options = [{"label": col, "value": col} for col in df_metadata.columns]
 
+        # Create visual feedback showing file uploaded
+        upload_visual = html.Div(
+            [
+                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
+                html.Div(
+                    [
+                        html.Strong(filename, className="text-success"),
+                        html.Br(),
+                        html.Small(f"{df_metadata.shape[0]} rows × {df_metadata.shape[1]} columns", className="text-muted")
+                    ],
+                    style={"display": "inline-block", "verticalAlign": "middle"}
+                )
+            ],
+            className="d-flex align-items-center justify-content-center",
+            style={"padding": "20px"}
+        )
+
         logger.info(f"Metadata successfully stored with {len(column_options)} column options")
-        return metadata_json, column_options
+        return metadata_json, column_options, upload_visual
 
     except Exception as e:
         logger.error(f"Failed to process metadata upload: {e}", exc_info=True)
@@ -65,7 +83,10 @@ def store_raw_metadata(metadata_content, filename):
 
 
 @callback(
-    Output(ids.STORE_RAW_CLR_DATA, "data"),
+    [
+        Output(ids.STORE_RAW_CLR_DATA, "data"),
+        Output(ids.UPLOAD_CLR_DATA, "children")
+    ],
     Input(ids.UPLOAD_CLR_DATA, "contents"),
     State(ids.UPLOAD_CLR_DATA, "filename"),
     prevent_initial_call=True
@@ -102,8 +123,25 @@ def store_raw_clr_data(clr_content, filename):
 
         clr_json = df_clr.to_pandas().to_json(orient="split")
 
+        # Create visual feedback showing file uploaded
+        upload_visual = html.Div(
+            [
+                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
+                html.Div(
+                    [
+                        html.Strong(filename, className="text-success"),
+                        html.Br(),
+                        html.Small(f"{df_clr.shape[0]} rows × {df_clr.shape[1]} columns", className="text-muted")
+                    ],
+                    style={"display": "inline-block", "verticalAlign": "middle"}
+                )
+            ],
+            className="d-flex align-items-center justify-content-center",
+            style={"padding": "20px"}
+        )
+
         logger.info("CLR data successfully stored")
-        return clr_json
+        return clr_json, upload_visual
 
     except Exception as e:
         logger.error(f"Failed to process CLR data upload: {e}", exc_info=True)
@@ -182,10 +220,11 @@ def load_and_merge_data(
 
     try:
         import pandas as pd
+        from io import StringIO
 
-        # Load dataframes from stored JSON
-        df_metadata = pl.from_pandas(pd.read_json(metadata_json, orient="split"))
-        df_clr = pl.from_pandas(pd.read_json(clr_json, orient="split"))
+        # Load dataframes from stored JSON (using StringIO to avoid FutureWarning)
+        df_metadata = pl.from_pandas(pd.read_json(StringIO(metadata_json), orient="split"))
+        df_clr = pl.from_pandas(pd.read_json(StringIO(clr_json), orient="split"))
 
         # Step 1: Determine sample column in METADATA
         # Use manual selection if provided, otherwise auto-detect
@@ -262,7 +301,7 @@ def load_and_merge_data(
                 html.Div(
                     [
                         html.I(className="bi bi-check-circle-fill text-success me-2"),
-                        f"Sample ID Column: {sample_col}"
+                        f"Sample ID Column: {metadata_sample_col}"
                     ],
                     className="mt-2"
                 )
@@ -334,7 +373,8 @@ def update_data_table(merged_data_json):
         raise PreventUpdate
 
     import pandas as pd
-    df = pd.read_json(merged_data_json, orient="split")
+    from io import StringIO
+    df = pd.read_json(StringIO(merged_data_json), orient="split")
 
     # Generate column definitions
     column_defs = [{"field": col, "headerName": col} for col in df.columns]
@@ -374,7 +414,8 @@ def populate_dropdowns(metadata_cols, feature_cols, merged_data_json):
         raise PreventUpdate
 
     import pandas as pd
-    df = pd.read_json(merged_data_json, orient="split")
+    from io import StringIO
+    df = pd.read_json(StringIO(merged_data_json), orient="split")
 
     # Group by options: metadata columns only
     groupby_options = [{"label": col, "value": col} for col in metadata_cols]
@@ -417,7 +458,8 @@ def update_boxplot(group_col, feature_col, merged_data_json, theme):
         return plots.create_empty_figure("Select both Group and Feature to display plot", theme=plotly_theme)
 
     import pandas as pd
-    df_pandas = pd.read_json(merged_data_json, orient="split")
+    from io import StringIO
+    df_pandas = pd.read_json(StringIO(merged_data_json), orient="split")
     df = pl.from_pandas(df_pandas)
 
     return plots.create_boxplot(df, feature_col, group_col, theme=plotly_theme)
@@ -453,7 +495,8 @@ def update_scatter(x_col, y_col, color_col, merged_data_json, theme):
         return plots.create_empty_figure("Select both X and Y axes to display plot", theme=plotly_theme)
 
     import pandas as pd
-    df_pandas = pd.read_json(merged_data_json, orient="split")
+    from io import StringIO
+    df_pandas = pd.read_json(StringIO(merged_data_json), orient="split")
     df = pl.from_pandas(df_pandas)
 
     return plots.create_scatter(df, x_col, y_col, color_col, theme=plotly_theme)
@@ -589,3 +632,58 @@ def update_sidebar_theme(theme):
         })
 
     return base_style
+
+
+@callback(
+    Output(ids.MAIN_CONTAINER, "style"),
+    Input(ids.STORE_THEME, "data")
+)
+def update_main_container_theme(theme):
+    """
+    Update main content area styling based on theme.
+    Ensures tabs and content have proper dark mode colors.
+
+    Args:
+        theme: Current theme (light or dark)
+
+    Returns:
+        Style dict for main container
+    """
+    base_style = {
+        "marginLeft": "340px",
+        "marginTop": "100px",
+        "padding": "20px"
+    }
+
+    if theme == "dark":
+        base_style.update({
+            "backgroundColor": "#1E1E1E",
+            "color": "#CCCCCC"
+        })
+    else:
+        base_style.update({
+            "backgroundColor": "#ffffff",
+            "color": "#212529"
+        })
+
+    return base_style
+
+
+@callback(
+    Output(ids.TABLE_DATA_EXPLORER, "className"),
+    Input(ids.STORE_THEME, "data")
+)
+def update_table_theme(theme):
+    """
+    Update ag-grid theme based on app theme.
+
+    Args:
+        theme: Current theme (light or dark)
+
+    Returns:
+        className for ag-grid
+    """
+    if theme == "dark":
+        return "ag-theme-alpine-dark"
+    else:
+        return "ag-theme-alpine"
