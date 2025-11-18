@@ -8,17 +8,15 @@ from pgptracker.gui import ids
 def create_upload_card(
     card_title: str,
     upload_id: str,
-    upload_text: str,
-    container_id: str
+    upload_text: str
 ) -> dbc.Card:
     """
-    Create a reusable upload card component with persistent visual feedback.
+    Create a reusable upload card component.
 
     Args:
         card_title: Title displayed at top of card
         upload_id: Unique ID for the dcc.Upload component
         upload_text: Text displayed in upload area
-        container_id: Unique ID for the container div
 
     Returns:
         dbc.Card containing upload component
@@ -27,32 +25,30 @@ def create_upload_card(
         [
             dbc.CardHeader(html.H5(card_title)),
             dbc.CardBody(
-                html.Div(
-                    id=container_id,
-                    children=[
-                        dcc.Upload(
-                            id=upload_id,
-                            children=html.Div(
-                                [
-                                    html.I(className="bi bi-cloud-upload me-2", style={"fontSize": "24px"}),
-                                    html.Span(upload_text)
-                                ],
-                                className="d-flex align-items-center justify-content-center"
-                            ),
-                            style={
-                                "width": "100%",
-                                "height": "80px",
-                                "borderWidth": "2px",
-                                "borderStyle": "dashed",
-                                "borderRadius": "5px",
-                                "textAlign": "center",
-                                "cursor": "pointer"
-                            },
-                            multiple=False,
-                            max_size=-1
-                        )
-                    ]
-                )
+                [
+                    dcc.Upload(
+                        id=upload_id,
+                        children=html.Div(
+                            [
+                                html.I(className="bi bi-cloud-upload me-2"),
+                                upload_text
+                            ],
+                            className="d-flex align-items-center justify-content-center"
+                        ),
+                        style={
+                            "width": "100%",
+                            "height": "80px",
+                            "lineHeight": "80px",
+                            "borderWidth": "2px",
+                            "borderStyle": "dashed",
+                            "borderRadius": "5px",
+                            "textAlign": "center",
+                            "cursor": "pointer"
+                        },
+                        multiple=False,
+                        max_size=-1
+                    )
+                ]
             )
         ],
         className="mb-3 sidebar-card"
@@ -70,18 +66,28 @@ def create_sidebar() -> html.Div:
         [
             html.H4("Data Input", className="mb-4", id="sidebar-title"),
 
-            create_upload_card(
-                card_title="1. Upload Metadata",
-                upload_id=ids.UPLOAD_METADATA,
-                upload_text="Drag and drop or click to upload metadata.tsv",
-                container_id=ids.UPLOAD_METADATA_CONTAINER
+            dcc.Loading(
+                id="loading-metadata",
+                type="circle",
+                children=[
+                    create_upload_card(
+                        card_title="1. Upload Metadata",
+                        upload_id=ids.UPLOAD_METADATA,
+                        upload_text="Drag and drop or click to upload metadata.tsv"
+                    )
+                ]
             ),
 
-            create_upload_card(
-                card_title="2. Upload CLR Data",
-                upload_id=ids.UPLOAD_CLR_DATA,
-                upload_text="Drag and drop or click to upload clr_wide_N_D.tsv",
-                container_id=ids.UPLOAD_CLR_CONTAINER
+            dcc.Loading(
+                id="loading-clr",
+                type="circle",
+                children=[
+                    create_upload_card(
+                        card_title="2. Upload CLR Data",
+                        upload_id=ids.UPLOAD_CLR_DATA,
+                        upload_text="Drag and drop or click to upload clr_wide_N_D.tsv"
+                    )
+                ]
             ),
 
             dbc.Card(

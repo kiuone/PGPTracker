@@ -16,59 +16,23 @@ logger = logging.getLogger(__name__)
     [
         Output(ids.STORE_RAW_METADATA, "data"),
         Output(ids.DROPDOWN_SAMPLE_ID, "options"),
-        Output(ids.UPLOAD_METADATA_CONTAINER, "children")
+        Output(ids.UPLOAD_METADATA, "children")
     ],
-    [
-        Input(ids.UPLOAD_METADATA, "contents"),
-        Input(ids.BTN_CLEAR_METADATA, "n_clicks")
-    ],
+    Input(ids.UPLOAD_METADATA, "contents"),
     State(ids.UPLOAD_METADATA, "filename"),
     prevent_initial_call=True
 )
-def store_raw_metadata(metadata_content, clear_clicks, filename):
+def store_raw_metadata(metadata_content, filename):
     """
     Store raw metadata and populate sample ID dropdown with all column names.
-    Also handles clear button to reset upload.
 
     Args:
         metadata_content: Base64 encoded metadata file content
-        clear_clicks: Number of clicks on clear button
         filename: Name of uploaded file
 
     Returns:
-        Tuple of (metadata_json, dropdown_options, upload_container_children)
+        Tuple of (metadata_json, dropdown_options)
     """
-    from dash import ctx
-
-    # Check which input triggered the callback
-    triggered_id = ctx.triggered_id
-
-    # If clear button was clicked, reset everything
-    if triggered_id == ids.BTN_CLEAR_METADATA:
-        logger.info("Metadata cleared by user")
-        empty_upload = dcc.Upload(
-            id=ids.UPLOAD_METADATA,
-            children=html.Div(
-                [
-                    html.I(className="bi bi-cloud-upload me-2", style={"fontSize": "24px"}),
-                    html.Span("Drag and drop or click to upload metadata.tsv")
-                ],
-                className="d-flex align-items-center justify-content-center"
-            ),
-            style={
-                "width": "100%",
-                "height": "80px",
-                "borderWidth": "2px",
-                "borderStyle": "dashed",
-                "borderRadius": "5px",
-                "textAlign": "center",
-                "cursor": "pointer"
-            },
-            multiple=False,
-            max_size=-1
-        )
-        return None, [], [empty_upload]
-
     print(f"DEBUG: Metadata upload callback triggered for file: {filename}")
     logger.info(f"Metadata upload callback triggered for file: {filename}")
 
@@ -93,46 +57,25 @@ def store_raw_metadata(metadata_content, clear_clicks, filename):
         # Populate dropdown with all columns for manual selection if needed
         column_options = [{"label": col, "value": col} for col in df_metadata.columns]
 
-        # Create visual feedback showing file uploaded with clear button
-        upload_visual = dbc.Card(
+        # Create visual feedback showing file uploaded
+        upload_visual = html.Div(
             [
+                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
                 html.Div(
                     [
-                        html.Div(
-                            [
-                                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
-                                html.Div(
-                                    [
-                                        html.Strong(filename, className="text-success"),
-                                        html.Br(),
-                                        html.Small(f"{df_metadata.shape[0]} rows × {df_metadata.shape[1]} columns", className="text-muted")
-                                    ],
-                                    style={"display": "inline-block", "verticalAlign": "middle"}
-                                )
-                            ],
-                            className="d-flex align-items-center flex-grow-1"
-                        ),
-                        dbc.Button(
-                            html.I(className="bi bi-x-circle-fill"),
-                            id=ids.BTN_CLEAR_METADATA,
-                            color="danger",
-                            size="sm",
-                            className="ms-2"
-                        )
+                        html.Strong(filename, className="text-success"),
+                        html.Br(),
+                        html.Small(f"{df_metadata.shape[0]} rows × {df_metadata.shape[1]} columns", className="text-muted")
                     ],
-                    className="d-flex align-items-center justify-content-between",
-                    style={"padding": "15px"}
+                    style={"display": "inline-block", "verticalAlign": "middle"}
                 )
             ],
-            style={
-                "backgroundColor": "#d4edda",
-                "border": "2px solid #28a745",
-                "borderRadius": "5px"
-            }
+            className="d-flex align-items-center justify-content-center",
+            style={"padding": "20px"}
         )
 
         logger.info(f"Metadata successfully stored with {len(column_options)} column options")
-        return metadata_json, column_options, [upload_visual]
+        return metadata_json, column_options, upload_visual
 
     except Exception as e:
         logger.error(f"Failed to process metadata upload: {e}", exc_info=True)
@@ -142,59 +85,23 @@ def store_raw_metadata(metadata_content, clear_clicks, filename):
 @callback(
     [
         Output(ids.STORE_RAW_CLR_DATA, "data"),
-        Output(ids.UPLOAD_CLR_CONTAINER, "children")
+        Output(ids.UPLOAD_CLR_DATA, "children")
     ],
-    [
-        Input(ids.UPLOAD_CLR_DATA, "contents"),
-        Input(ids.BTN_CLEAR_CLR, "n_clicks")
-    ],
+    Input(ids.UPLOAD_CLR_DATA, "contents"),
     State(ids.UPLOAD_CLR_DATA, "filename"),
     prevent_initial_call=True
 )
-def store_raw_clr_data(clr_content, clear_clicks, filename):
+def store_raw_clr_data(clr_content, filename):
     """
     Store raw CLR data for merging.
-    Also handles clear button to reset upload.
 
     Args:
         clr_content: Base64 encoded CLR data file content
-        clear_clicks: Number of clicks on clear button
         filename: Name of uploaded file
 
     Returns:
-        Tuple of (clr_json, upload_container_children)
+        JSON string of CLR DataFrame
     """
-    from dash import ctx
-
-    # Check which input triggered the callback
-    triggered_id = ctx.triggered_id
-
-    # If clear button was clicked, reset everything
-    if triggered_id == ids.BTN_CLEAR_CLR:
-        logger.info("CLR data cleared by user")
-        empty_upload = dcc.Upload(
-            id=ids.UPLOAD_CLR_DATA,
-            children=html.Div(
-                [
-                    html.I(className="bi bi-cloud-upload me-2", style={"fontSize": "24px"}),
-                    html.Span("Drag and drop or click to upload clr_wide_N_D.tsv")
-                ],
-                className="d-flex align-items-center justify-content-center"
-            ),
-            style={
-                "width": "100%",
-                "height": "80px",
-                "borderWidth": "2px",
-                "borderStyle": "dashed",
-                "borderRadius": "5px",
-                "textAlign": "center",
-                "cursor": "pointer"
-            },
-            multiple=False,
-            max_size=-1
-        )
-        return None, [empty_upload]
-
     print(f"DEBUG: CLR data upload callback triggered for file: {filename}")
     logger.info(f"CLR data upload callback triggered for file: {filename}")
 
@@ -216,46 +123,25 @@ def store_raw_clr_data(clr_content, clear_clicks, filename):
 
         clr_json = df_clr.to_pandas().to_json(orient="split")
 
-        # Create visual feedback showing file uploaded with clear button
-        upload_visual = dbc.Card(
+        # Create visual feedback showing file uploaded
+        upload_visual = html.Div(
             [
+                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
                 html.Div(
                     [
-                        html.Div(
-                            [
-                                html.I(className="bi bi-file-earmark-check-fill text-success me-2", style={"fontSize": "24px"}),
-                                html.Div(
-                                    [
-                                        html.Strong(filename, className="text-success"),
-                                        html.Br(),
-                                        html.Small(f"{df_clr.shape[0]} rows × {df_clr.shape[1]} columns", className="text-muted")
-                                    ],
-                                    style={"display": "inline-block", "verticalAlign": "middle"}
-                                )
-                            ],
-                            className="d-flex align-items-center flex-grow-1"
-                        ),
-                        dbc.Button(
-                            html.I(className="bi bi-x-circle-fill"),
-                            id=ids.BTN_CLEAR_CLR,
-                            color="danger",
-                            size="sm",
-                            className="ms-2"
-                        )
+                        html.Strong(filename, className="text-success"),
+                        html.Br(),
+                        html.Small(f"{df_clr.shape[0]} rows × {df_clr.shape[1]} columns", className="text-muted")
                     ],
-                    className="d-flex align-items-center justify-content-between",
-                    style={"padding": "15px"}
+                    style={"display": "inline-block", "verticalAlign": "middle"}
                 )
             ],
-            style={
-                "backgroundColor": "#d4edda",
-                "border": "2px solid #28a745",
-                "borderRadius": "5px"
-            }
+            className="d-flex align-items-center justify-content-center",
+            style={"padding": "20px"}
         )
 
         logger.info("CLR data successfully stored")
-        return clr_json, [upload_visual]
+        return clr_json, upload_visual
 
     except Exception as e:
         logger.error(f"Failed to process CLR data upload: {e}", exc_info=True)
