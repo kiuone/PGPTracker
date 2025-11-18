@@ -615,37 +615,23 @@ def register_analysis_command(subparsers: argparse._SubParsersAction) -> None:
 def gui_command(args: argparse.Namespace) -> int:
     """
     Handler for the 'gui' subcommand.
-    Launches the Dash web application for interactive data exploration.
+    Launches the Streamlit web application for interactive data exploration.
     """
     try:
-        import logging
         from pgptracker.gui import run_app
 
-        # Configure logging based on verbosity
-        level = logging.INFO if args.verbose else logging.WARNING
-        logging.basicConfig(
-            level=level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-
-        # Suppress overly verbose Dash logs unless in verbose mode
-        if not args.verbose:
-            logging.getLogger('dash').setLevel(logging.WARNING)
-            logging.getLogger('werkzeug').setLevel(logging.WARNING)
-
         if args.verbose:
-            print("Starting PGPTracker GUI...")
-            print(f"Server will run on http://0.0.0.0:{args.port}")
-            print(f"Debug mode: {args.debug}")
-            print(f"Verbose logging: enabled")
+            print("Starting PGPTracker GUI (Streamlit)...")
+            print(f"Server will run on http://localhost:{args.port}")
+            if args.results_dir:
+                print(f"Auto-loading data from: {args.results_dir}")
             print("Press Ctrl+C to stop the server")
 
-        run_app(debug=args.debug, port=args.port)
+        run_app(results_dir=args.results_dir, port=args.port)
         return 0
     except ImportError as e:
         print(f"[ERROR] GUI dependencies not installed: {e}", file=sys.stderr)
-        print("Install with: pip install dash dash-bootstrap-components dash-ag-grid", file=sys.stderr)
+        print("Install with: pip install streamlit plotly", file=sys.stderr)
         return 1
     except Exception as e:
         print(f"[ERROR] GUI launch failed: {e}", file=sys.stderr)
@@ -656,28 +642,31 @@ def register_gui_command(subparsers: argparse._SubParsersAction):
     gui_parser = subparsers.add_parser(
         "gui",
         help="Launch interactive GUI for Stage 2 data exploration",
-        description="Launch the PGPTracker Stage 2 Data Explorer web interface. "
-                    "Use this to interactively explore CLR-transformed feature tables and metadata."
+        description="Launch the PGPTracker Stage 2 Data Explorer (Streamlit). "
+                    "Use this to interactively explore CLR-transformed feature tables and metadata. "
+                    "Optionally provide a results directory to auto-load data."
+    )
+
+    gui_parser.add_argument(
+        "--results-dir",
+        type=str,
+        default=None,
+        metavar="PATH",
+        help="Path to results directory containing clr_wide_N_D.tsv and metadata.tsv for auto-loading"
     )
 
     gui_parser.add_argument(
         "--port",
         type=int,
-        default=8050,
+        default=8501,
         metavar="PORT",
-        help="Port number for the web server (default: 8050)"
-    )
-
-    gui_parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Run server in debug mode with auto-reload"
+        help="Port number for the web server (default: 8501)"
     )
 
     gui_parser.add_argument(
         "-v", "--verbose",
         action="store_true",
-        help="Enable verbose logging (INFO level). Default: WARNING level for clean terminal."
+        help="Enable verbose output. Default: minimal output for clean terminal."
     )
 
     gui_parser.set_defaults(func=gui_command)

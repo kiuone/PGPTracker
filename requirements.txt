@@ -21,9 +21,7 @@ seaborn
 plotly
 
 # GUI
-dash
-dash-bootstrap-components
-dash-ag-grid
+streamlit
 
 # Utilities
 pyyaml
