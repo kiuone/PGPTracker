@@ -29,6 +29,7 @@ pyyaml
 tqdm
 appdirs
 setuptools
+psutil
 
 # Testing
 # pytest
