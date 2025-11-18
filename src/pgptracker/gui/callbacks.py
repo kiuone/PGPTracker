@@ -635,41 +635,6 @@ def update_sidebar_theme(theme):
 
 
 @callback(
-    Output(ids.MAIN_CONTAINER, "style"),
-    Input(ids.STORE_THEME, "data")
-)
-def update_main_container_theme(theme):
-    """
-    Update main content area styling based on theme.
-    Ensures tabs and content have proper dark mode colors.
-
-    Args:
-        theme: Current theme (light or dark)
-
-    Returns:
-        Style dict for main container
-    """
-    base_style = {
-        "marginLeft": "340px",
-        "marginTop": "100px",
-        "padding": "20px"
-    }
-
-    if theme == "dark":
-        base_style.update({
-            "backgroundColor": "#1E1E1E",
-            "color": "#CCCCCC"
-        })
-    else:
-        base_style.update({
-            "backgroundColor": "#ffffff",
-            "color": "#212529"
-        })
-
-    return base_style
-
-
-@callback(
     Output(ids.TABLE_DATA_EXPLORER, "className"),
     Input(ids.STORE_THEME, "data")
 )
