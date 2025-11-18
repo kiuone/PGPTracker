@@ -34,7 +34,7 @@ def run_app(debug=True, port=8050):
         debug: Enable debug mode (default: True)
         port: Port number to run the server (default: 8050)
     """
-    app.run_server(debug=debug, port=port, host="0.0.0.0")
+    app.run(debug=debug, port=port, host="0.0.0.0")
 
 
 if __name__ == "__main__":
