@@ -45,12 +45,13 @@ def create_upload_card(
                             "textAlign": "center",
                             "cursor": "pointer"
                         },
-                        multiple=False
+                        multiple=False,
+                        max_size=-1
                     )
                 ]
             )
         ],
-        className="mb-3"
+        className="mb-3 sidebar-card"
     )
 
 
@@ -63,7 +64,7 @@ def create_sidebar() -> html.Div:
     """
     return html.Div(
         [
-            html.H4("Data Input", className="mb-4"),
+            html.H4("Data Input", className="mb-4", id="sidebar-title"),
 
             dcc.Loading(
                 id="loading-metadata",
@@ -106,7 +107,7 @@ def create_sidebar() -> html.Div:
                         ]
                     )
                 ],
-                className="mb-3"
+                className="mb-3 sidebar-card"
             ),
 
             dbc.Card(
@@ -114,27 +115,19 @@ def create_sidebar() -> html.Div:
                     dbc.CardHeader(html.H5("Upload Status")),
                     dbc.CardBody(id=ids.DIV_UPLOAD_STATUS)
                 ],
-                className="mb-3"
+                className="mb-3 sidebar-card"
             ),
 
             dbc.Card(
                 [
                     dbc.CardHeader(html.H5("Data Summary")),
                     dbc.CardBody(id=ids.DIV_DATA_SUMMARY)
-                ]
+                ],
+                className="sidebar-card"
             )
         ],
-        style={
-            "position": "fixed",
-            "top": "120px",
-            "left": "0",
-            "bottom": "0",
-            "width": "320px",
-            "padding": "20px",
-            "backgroundColor": "#f8f9fa",
-            "overflowY": "auto",
-            "zIndex": "100"
-        }
+        id="sidebar-container"
+        # Style is now controlled by update_sidebar_theme callback in callbacks.py
     )
 
 

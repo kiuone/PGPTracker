@@ -18,24 +18,29 @@ logger = logging.getLogger(__name__)
         Output(ids.DROPDOWN_SAMPLE_ID, "options")
     ],
     Input(ids.UPLOAD_METADATA, "contents"),
+    State(ids.UPLOAD_METADATA, "filename"),
     prevent_initial_call=True
 )
-def store_raw_metadata(metadata_content):
+def store_raw_metadata(metadata_content, filename):
     """
     Store raw metadata and populate sample ID dropdown with all column names.
 
     Args:
         metadata_content: Base64 encoded metadata file content
+        filename: Name of uploaded file
 
     Returns:
         Tuple of (metadata_json, dropdown_options)
     """
+    print(f"DEBUG: Metadata upload callback triggered for file: {filename}")
+    logger.info(f"Metadata upload callback triggered for file: {filename}")
+
     if not metadata_content:
         logger.warning("Metadata upload triggered but no content received")
         raise PreventUpdate
 
     try:
-        logger.info("Processing metadata upload")
+        logger.info(f"Processing metadata upload: {filename}")
         meta_decoded = base64.b64decode(metadata_content.split(",")[1])
         df_metadata = pl.read_csv(io.BytesIO(meta_decoded), separator="\t")
 
@@ -57,24 +62,29 @@ def store_raw_metadata(metadata_content):
 @callback(
     Output(ids.STORE_RAW_CLR_DATA, "data"),
     Input(ids.UPLOAD_CLR_DATA, "contents"),
+    State(ids.UPLOAD_CLR_DATA, "filename"),
     prevent_initial_call=True
 )
-def store_raw_clr_data(clr_content):
+def store_raw_clr_data(clr_content, filename):
     """
     Store raw CLR data for merging.
 
     Args:
         clr_content: Base64 encoded CLR data file content
+        filename: Name of uploaded file
 
     Returns:
         JSON string of CLR DataFrame
     """
+    print(f"DEBUG: CLR data upload callback triggered for file: {filename}")
+    logger.info(f"CLR data upload callback triggered for file: {filename}")
+
     if not clr_content:
         logger.warning("CLR data upload triggered but no content received")
         raise PreventUpdate
 
     try:
-        logger.info("Processing CLR data upload")
+        logger.info(f"Processing CLR data upload: {filename}")
         clr_decoded = base64.b64decode(clr_content.split(",")[1])
         df_clr = pl.read_csv(io.BytesIO(clr_decoded), separator="\t")
 
@@ -509,6 +519,46 @@ def update_app_container_theme(theme):
     else:
         base_style.update({
             "backgroundColor": "#ffffff"
+        })
+
+    return base_style
+
+
+@callback(
+    Output("sidebar-container", "style"),
+    Input(ids.STORE_THEME, "data")
+)
+def update_sidebar_theme(theme):
+    """
+    Update sidebar styling based on theme.
+    Overrides Bootstrap card white backgrounds with professional dark mode colors.
+
+    Args:
+        theme: Current theme (light or dark)
+
+    Returns:
+        Style dict for sidebar container
+    """
+    base_style = {
+        "position": "fixed",
+        "top": "120px",
+        "left": "0",
+        "bottom": "0",
+        "width": "320px",
+        "padding": "20px",
+        "overflowY": "auto",
+        "zIndex": "100"
+    }
+
+    if theme == "dark":
+        base_style.update({
+            "backgroundColor": "#252526",
+            "color": "#E0E0E0"
+        })
+    else:
+        base_style.update({
+            "backgroundColor": "#f8f9fa",
+            "color": "#212529"
         })
 
     return base_style
