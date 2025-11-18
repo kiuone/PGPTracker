@@ -22,6 +22,13 @@ def render():
     df_merged = st.session_state.df_merged
     metadata_cols = st.session_state.metadata_cols
     feature_cols = st.session_state.feature_cols
+    format_type = st.session_state.get('format_type', 'wide')
+
+    # Show format info
+    if format_type == "long":
+        st.info("📊 **LONG/STRATIFIED Format** detected - Using Abundance column for visualization")
+    else:
+        st.info("📊 **WIDE Format** detected - Each column is a separate feature")
 
     # Control panel
     st.markdown("### 📊 Plot Controls")
@@ -36,35 +43,70 @@ def render():
         )
 
     with col2:
-        feature_col = st.selectbox(
-            "Feature (Abundance):",
-            options=feature_cols,
-            help="Select a feature to visualize"
-        )
+        if format_type == "long":
+            # For long format, let user select taxonomic/functional column
+            feature_col = st.selectbox(
+                "Stratification Column:",
+                options=feature_cols,
+                help="Select the taxonomic or functional stratification column (e.g., Taxonomy, PGPT)"
+            )
+        else:
+            # For wide format, select numeric feature column
+            feature_col = st.selectbox(
+                "Feature (Abundance):",
+                options=feature_cols,
+                help="Select a feature to visualize"
+            )
 
     # Visualization tabs
     viz_tab1, viz_tab2, viz_tab3 = st.tabs(["📦 Boxplot", "📈 Scatter Plot", "📋 Summary Table"])
 
     with viz_tab1:
-        st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
+        if format_type == "long":
+            st.markdown(f"### Abundance Distribution by **{group_col}**")
+            st.caption(f"Stratified by: {feature_col}")
 
-        # Create boxplot with points (Plotly 5.18+ supports Polars directly)
-        fig = px.box(
-            df_merged,
-            x=group_col,
-            y=feature_col,
-            color=group_col,
-            points="all",  # Show all points
-            title=f"Distribution of {feature_col} by {group_col}"
-        )
+            # For long format, use Abundance column
+            # Detect abundance column name
+            abundance_col = None
+            for col in df_merged.columns:
+                if col.lower() in ['abundance', 'count', 'value']:
+                    abundance_col = col
+                    break
 
-        fig.update_layout(
-            height=500,
-            showlegend=True,
-            template="plotly_white"
-        )
+            if abundance_col:
+                # Create boxplot with Abundance on y-axis
+                fig = px.box(
+                    df_merged,
+                    x=group_col,
+                    y=abundance_col,
+                    color=group_col,
+                    points="all",
+                    title=f"Abundance Distribution by {group_col}"
+                )
+            else:
+                st.error("⚠️ Could not find Abundance/Count/Value column in data")
+                fig = None
+        else:
+            st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
 
-        st.plotly_chart(fig, use_container_width=True)
+            # Create boxplot with points (Plotly 5.18+ supports Polars directly)
+            fig = px.box(
+                df_merged,
+                x=group_col,
+                y=feature_col,
+                color=group_col,
+                points="all",  # Show all points
+                title=f"Distribution of {feature_col} by {group_col}"
+            )
+
+        if fig:
+            fig.update_layout(
+                height=500,
+                showlegend=True,
+                template="plotly_white"
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
     with viz_tab2:
         st.markdown("### Scatter Plot")
@@ -114,30 +156,61 @@ def render():
     with viz_tab3:
         st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
 
-        # Calculate summary statistics
-        summary = (
-            df_merged
-            .group_by(group_col)
-            .agg([
-                pl.col(feature_col).count().alias("N"),
-                pl.col(feature_col).mean().alias("Mean"),
-                pl.col(feature_col).std().alias("Std"),
-                pl.col(feature_col).min().alias("Min"),
-                pl.col(feature_col).median().alias("Median"),
-                pl.col(feature_col).max().alias("Max"),
-            ])
-            .with_columns(
-                (pl.col("Std") / pl.col("Mean") * 100).alias("CV%")
+        # Calculate summary statistics based on format
+        if format_type == "long":
+            # For long format, compute stats on Abundance column
+            abundance_col = None
+            for col in df_merged.columns:
+                if col.lower() in ['abundance', 'count', 'value']:
+                    abundance_col = col
+                    break
+
+            if abundance_col:
+                summary = (
+                    df_merged
+                    .group_by(group_col)
+                    .agg([
+                        pl.col(abundance_col).count().alias("N"),
+                        pl.col(abundance_col).mean().alias("Mean"),
+                        pl.col(abundance_col).std().alias("Std"),
+                        pl.col(abundance_col).min().alias("Min"),
+                        pl.col(abundance_col).median().alias("Median"),
+                        pl.col(abundance_col).max().alias("Max"),
+                    ])
+                    .with_columns(
+                        (pl.col("Std") / pl.col("Mean") * 100).alias("CV%")
+                    )
+                    .sort(group_col)
+                )
+            else:
+                st.error("⚠️ Could not find Abundance/Count/Value column in data")
+                summary = None
+        else:
+            # For wide format, compute stats on selected feature column
+            summary = (
+                df_merged
+                .group_by(group_col)
+                .agg([
+                    pl.col(feature_col).count().alias("N"),
+                    pl.col(feature_col).mean().alias("Mean"),
+                    pl.col(feature_col).std().alias("Std"),
+                    pl.col(feature_col).min().alias("Min"),
+                    pl.col(feature_col).median().alias("Median"),
+                    pl.col(feature_col).max().alias("Max"),
+                ])
+                .with_columns(
+                    (pl.col("Std") / pl.col("Mean") * 100).alias("CV%")
+                )
+                .sort(group_col)
             )
-            .sort(group_col)
-        )
 
         # Streamlit supports Polars DataFrames directly
-        st.dataframe(
-            summary,
-            use_container_width=True,
-            height=400
-        )
+        if summary is not None:
+            st.dataframe(
+                summary,
+                use_container_width=True,
+                height=400
+            )
 
     # Full data table
     st.markdown("---")

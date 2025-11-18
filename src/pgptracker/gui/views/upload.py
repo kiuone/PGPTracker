@@ -42,7 +42,7 @@ def auto_load_from_directory(results_dir: Path):
                 return
 
             # Merge data
-            df_merged, metadata_cols, feature_cols = utils.merge_data(
+            df_merged, metadata_cols, feature_cols, format_type = utils.merge_data(
                 df_clr, df_metadata, metadata_sample_col
             )
 
@@ -50,6 +50,7 @@ def auto_load_from_directory(results_dir: Path):
             st.session_state.df_merged = df_merged
             st.session_state.metadata_cols = metadata_cols
             st.session_state.feature_cols = feature_cols
+            st.session_state.format_type = format_type
             st.session_state.n_samples = df_merged.shape[0]
             st.session_state.n_features = len(feature_cols)
             st.session_state.n_metadata_cols = len(metadata_cols)
@@ -86,14 +87,20 @@ def render():
     if st.session_state.get('data_loaded', False):
         st.success("✅ Data successfully loaded!")
 
+        # Show format type
+        format_type = st.session_state.get('format_type', 'wide')
+        st.info(f"📊 Data format detected: **{format_type.upper()}**")
+
         # Show summary
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
         with col1:
             st.metric("Samples", st.session_state.n_samples)
         with col2:
             st.metric("Features", st.session_state.n_features)
         with col3:
             st.metric("Metadata Columns", st.session_state.n_metadata_cols)
+        with col4:
+            st.metric("Format", format_type.upper())
 
         # Show preview (Streamlit supports Polars DataFrames directly)
         st.markdown("### 👀 Data Preview")
@@ -104,9 +111,13 @@ def render():
         )
 
         # Option to reset
-        if st.button("🔄 Load Different Data"):
-            st.session_state.data_loaded = False
-            st.session_state.df_merged = None
+        if st.button("🗑️ Clear Data & Load Different Files", type="secondary"):
+            # Clear all data from session state
+            for key in ['data_loaded', 'df_merged', 'metadata_cols', 'feature_cols',
+                       'format_type', 'n_samples', 'n_features', 'n_metadata_cols',
+                       'auto_load_attempted', 'auto_load_status']:
+                if key in st.session_state:
+                    del st.session_state[key]
             st.rerun()
 
     else:
@@ -118,19 +129,20 @@ def render():
         with col1:
             st.markdown("#### 1. Upload Metadata")
             metadata_file = st.file_uploader(
-                "metadata.tsv",
-                type=["tsv", "txt"],
+                "metadata file",
+                type=["tsv", "csv", "txt", "gz"],
                 key="metadata_upload",
-                help="Upload your metadata file (TSV format)"
+                help="Upload your metadata file (TSV, CSV, or compressed .gz)"
             )
 
         with col2:
-            st.markdown("#### 2. Upload CLR Data")
+            st.markdown("#### 2. Upload CLR/Feature Data")
             clr_file = st.file_uploader(
-                "clr_wide_N_D.tsv",
-                type=["tsv", "txt"],
+                "CLR or feature data",
+                type=["tsv", "csv", "txt", "gz"],
                 key="clr_upload",
-                help="Upload your CLR-transformed data (TSV format)"
+                help="Upload your CLR-transformed data (TSV, CSV, or compressed .gz)\n"
+                     "Supports both WIDE (N×D) and LONG/STRATIFIED formats"
             )
 
         # Process uploads
@@ -141,18 +153,24 @@ def render():
                     df_metadata = utils.load_uploaded_file(metadata_file)
                     df_clr = utils.load_uploaded_file(clr_file)
 
+                    # Detect format
+                    format_type = utils.detect_table_format(df_clr)
+                    st.info(f"📊 Detected format: **{format_type.upper()}**")
+
                     # Let user select sample column
                     st.markdown("#### 3. Select Sample ID Column")
+                    detected_col = utils.auto_detect_sample_column(df_metadata.columns)
+                    default_index = df_metadata.columns.index(detected_col) if detected_col else 0
+
                     metadata_sample_col = st.selectbox(
                         "Which column contains the sample IDs in metadata?",
                         options=df_metadata.columns,
-                        index=0 if not utils.auto_detect_sample_column(df_metadata.columns)
-                              else df_metadata.columns.index(utils.auto_detect_sample_column(df_metadata.columns))
+                        index=default_index
                     )
 
                     if st.button("✅ Load Data", type="primary"):
                         # Merge data
-                        df_merged, metadata_cols, feature_cols = utils.merge_data(
+                        df_merged, metadata_cols, feature_cols, format_type = utils.merge_data(
                             df_clr, df_metadata, metadata_sample_col
                         )
 
@@ -160,6 +178,7 @@ def render():
                         st.session_state.df_merged = df_merged
                         st.session_state.metadata_cols = metadata_cols
                         st.session_state.feature_cols = feature_cols
+                        st.session_state.format_type = format_type
                         st.session_state.n_samples = df_merged.shape[0]
                         st.session_state.n_features = len(feature_cols)
                         st.session_state.n_metadata_cols = len(metadata_cols)
@@ -170,3 +189,6 @@ def render():
 
                 except Exception as e:
                     st.error(f"Error loading data: {e}")
+                    import traceback
+                    with st.expander("Show error details"):
+                        st.code(traceback.format_exc())

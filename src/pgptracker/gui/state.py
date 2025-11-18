@@ -44,3 +44,7 @@ def init_session_state():
 
     if 'auto_load_status' not in st.session_state:
         st.session_state.auto_load_status = None
+
+    # Data format type (wide or long)
+    if 'format_type' not in st.session_state:
+        st.session_state.format_type = 'wide'
