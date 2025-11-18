@@ -110,20 +110,32 @@ def create_sidebar() -> html.Div:
                 className="mb-3 sidebar-card"
             ),
 
-            dbc.Card(
-                [
-                    dbc.CardHeader(html.H5("Upload Status")),
-                    dbc.CardBody(id=ids.DIV_UPLOAD_STATUS)
-                ],
-                className="mb-3 sidebar-card"
+            dcc.Loading(
+                id="loading-merge-status",
+                type="circle",
+                children=[
+                    dbc.Card(
+                        [
+                            dbc.CardHeader(html.H5("Upload Status")),
+                            dbc.CardBody(id=ids.DIV_UPLOAD_STATUS)
+                        ],
+                        className="mb-3 sidebar-card"
+                    )
+                ]
             ),
 
-            dbc.Card(
-                [
-                    dbc.CardHeader(html.H5("Data Summary")),
-                    dbc.CardBody(id=ids.DIV_DATA_SUMMARY)
-                ],
-                className="sidebar-card"
+            dcc.Loading(
+                id="loading-data-summary",
+                type="circle",
+                children=[
+                    dbc.Card(
+                        [
+                            dbc.CardHeader(html.H5("Data Summary")),
+                            dbc.CardBody(id=ids.DIV_DATA_SUMMARY)
+                        ],
+                        className="sidebar-card"
+                    )
+                ]
             )
         ],
         id="sidebar-container"

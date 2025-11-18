@@ -187,14 +187,15 @@ def load_and_merge_data(
         df_metadata = pl.from_pandas(pd.read_json(metadata_json, orient="split"))
         df_clr = pl.from_pandas(pd.read_json(clr_json, orient="split"))
 
-        # Determine sample column: use manual selection if provided, otherwise auto-detect
+        # Step 1: Determine sample column in METADATA
+        # Use manual selection if provided, otherwise auto-detect
         if selected_sample_col:
-            sample_col = selected_sample_col
+            metadata_sample_col = selected_sample_col
         else:
-            sample_col = _auto_detect_sample_column(df_metadata.columns)
+            metadata_sample_col = _auto_detect_sample_column(df_metadata.columns)
 
         # If auto-detection failed and no manual selection, prompt user
-        if not sample_col:
+        if not metadata_sample_col:
             error_status = html.Div(
                 [
                     html.I(className="bi bi-exclamation-triangle-fill text-warning me-2"),
@@ -208,25 +209,39 @@ def load_and_merge_data(
             )
             return None, None, None, error_status, ""
 
-        # Validate sample column exists in both datasets
-        if sample_col not in df_metadata.columns:
+        # Validate sample column exists in metadata
+        if metadata_sample_col not in df_metadata.columns:
             raise ValueError(
-                f"Selected column '{sample_col}' not found in metadata. "
+                f"Selected column '{metadata_sample_col}' not found in metadata. "
                 f"Available columns: {', '.join(df_metadata.columns)}"
             )
 
-        if sample_col not in df_clr.columns:
-            raise ValueError(
-                f"Selected column '{sample_col}' not found in CLR data. "
-                f"Available columns: {', '.join(df_clr.columns)}"
-            )
+        # Step 2: Determine sample column in CLR DATA
+        # Auto-detect in CLR data (usually "Sample" or first column)
+        clr_sample_col = _auto_detect_sample_column(df_clr.columns)
+        if not clr_sample_col:
+            # Fallback: assume first column is sample ID
+            clr_sample_col = df_clr.columns[0]
+            logger.info(f"CLR sample column auto-detection failed, using first column: {clr_sample_col}")
 
-        # Merge datasets
-        df_merged = df_clr.join(df_metadata, on=sample_col, how="inner")
+        # Step 3: Harmonize column names to standard "Sample"
+        # Rename metadata sample column to "Sample" if needed
+        if metadata_sample_col != "Sample":
+            df_metadata = df_metadata.rename({metadata_sample_col: "Sample"})
+            logger.info(f"Renamed metadata column '{metadata_sample_col}' -> 'Sample'")
 
-        # Extract metadata and feature column names
-        metadata_cols = [col for col in df_metadata.columns if col != sample_col]
-        feature_cols = [col for col in df_clr.columns if col != sample_col]
+        # Rename CLR sample column to "Sample" if needed
+        if clr_sample_col != "Sample":
+            df_clr = df_clr.rename({clr_sample_col: "Sample"})
+            logger.info(f"Renamed CLR column '{clr_sample_col}' -> 'Sample'")
+
+        # Step 4: Merge datasets on harmonized "Sample" column
+        df_merged = df_clr.join(df_metadata, on="Sample", how="inner")
+        logger.info(f"Merged {df_clr.shape[0]} CLR rows with {df_metadata.shape[0]} metadata rows -> {df_merged.shape[0]} final rows")
+
+        # Extract metadata and feature column names (excluding harmonized "Sample" column)
+        metadata_cols = [col for col in df_metadata.columns if col != "Sample"]
+        feature_cols = [col for col in df_clr.columns if col != "Sample"]
 
         # Create status message
         status = html.Div(
