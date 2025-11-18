@@ -23,9 +23,6 @@ def render():
     metadata_cols = st.session_state.metadata_cols
     feature_cols = st.session_state.feature_cols
 
-    # Convert to pandas for plotting (Plotly works better with pandas)
-    df_pandas = df_merged.to_pandas()
-
     # Control panel
     st.markdown("### 📊 Plot Controls")
 
@@ -51,9 +48,9 @@ def render():
     with viz_tab1:
         st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
 
-        # Create boxplot with points
+        # Create boxplot with points (Plotly 5.18+ supports Polars directly)
         fig = px.box(
-            df_pandas,
+            df_merged,
             x=group_col,
             y=feature_col,
             color=group_col,
@@ -96,13 +93,13 @@ def render():
                 key="scatter_color"
             )
 
-        # Create scatter plot
+        # Create scatter plot (Plotly supports Polars)
         fig_scatter = px.scatter(
-            df_pandas,
+            df_merged,
             x=scatter_x,
             y=scatter_y,
             color=scatter_color if scatter_color != "None" else None,
-            hover_name="Sample" if "Sample" in df_pandas.columns else None,
+            hover_name="Sample" if "Sample" in df_merged.columns else None,
             title=f"{scatter_y} vs {scatter_x}"
         )
 
@@ -135,8 +132,9 @@ def render():
             .sort(group_col)
         )
 
+        # Streamlit supports Polars DataFrames directly
         st.dataframe(
-            summary.to_pandas(),
+            summary,
             use_container_width=True,
             height=400
         )
@@ -146,37 +144,37 @@ def render():
     st.markdown("### 📄 Full Data Table")
 
     # Initialize with full data
-    df_filtered = df_pandas
+    df_filtered = df_merged
 
     # Add filters
     with st.expander("🔎 Filter Data"):
         filter_col = st.selectbox("Filter by column:", options=metadata_cols + feature_cols)
 
         if filter_col in metadata_cols:
-            # Categorical filter
-            unique_values = df_pandas[filter_col].unique()
+            # Categorical filter (Polars native)
+            unique_values = df_merged[filter_col].unique().to_list()
             selected_values = st.multiselect(
                 f"Select {filter_col} values:",
                 options=unique_values,
                 default=unique_values
             )
-            df_filtered = df_pandas[df_pandas[filter_col].isin(selected_values)]
+            df_filtered = df_merged.filter(pl.col(filter_col).is_in(selected_values))
         else:
-            # Numeric filter
-            min_val = float(df_pandas[filter_col].min())
-            max_val = float(df_pandas[filter_col].max())
+            # Numeric filter (Polars native)
+            min_val = float(df_merged[filter_col].min())
+            max_val = float(df_merged[filter_col].max())
             range_val = st.slider(
                 f"Range for {filter_col}:",
                 min_value=min_val,
                 max_value=max_val,
                 value=(min_val, max_val)
             )
-            df_filtered = df_pandas[
-                (df_pandas[filter_col] >= range_val[0]) &
-                (df_pandas[filter_col] <= range_val[1])
-            ]
+            df_filtered = df_merged.filter(
+                (pl.col(filter_col) >= range_val[0]) &
+                (pl.col(filter_col) <= range_val[1])
+            )
 
-        st.info(f"Showing {len(df_filtered)} / {len(df_pandas)} samples")
+        st.info(f"Showing {len(df_filtered)} / {len(df_merged)} samples")
 
     # Display table
     st.dataframe(
@@ -185,8 +183,8 @@ def render():
         height=400
     )
 
-    # Download button
-    csv = df_filtered.to_csv(index=False).encode('utf-8')
+    # Download button (use Polars native CSV export)
+    csv = df_filtered.write_csv()
     st.download_button(
         label="💾 Download Filtered Data as CSV",
         data=csv,

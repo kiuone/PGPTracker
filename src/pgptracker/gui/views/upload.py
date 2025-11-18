@@ -95,10 +95,10 @@ def render():
         with col3:
             st.metric("Metadata Columns", st.session_state.n_metadata_cols)
 
-        # Show preview
+        # Show preview (Streamlit supports Polars DataFrames directly)
         st.markdown("### 👀 Data Preview")
         st.dataframe(
-            st.session_state.df_merged.to_pandas().head(10),
+            st.session_state.df_merged.head(10),
             use_container_width=True,
             height=300
         )
