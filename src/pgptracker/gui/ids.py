@@ -11,6 +11,10 @@ STORE_THEME = "store-theme"
 # File upload components
 UPLOAD_METADATA = "upload-metadata"
 UPLOAD_CLR_DATA = "upload-clr-data"
+BTN_CLEAR_METADATA = "btn-clear-metadata"
+BTN_CLEAR_CLR = "btn-clear-clr"
+UPLOAD_METADATA_CONTAINER = "upload-metadata-container"
+UPLOAD_CLR_CONTAINER = "upload-clr-container"
 
 # Upload status displays
 DIV_UPLOAD_STATUS = "div-upload-status"
