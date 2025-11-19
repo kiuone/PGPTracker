@@ -103,7 +103,7 @@ def run_lasso_cv(
         print(f"  -> Warning: n_cv ({n_cv}) > n_samples ({n_samples}). Setting n_cv=n_samples.")
         n_cv = n_samples
         
-    lasso = LassoCV(cv=n_cv, random_state=random_state, n_jobs=-1).fit(X, y)
+    lasso = LassoCV(cv=n_cv, random_state=random_state, n_jobs=-1, max_iter=10000).fit(X, y)
     
     results = pl.DataFrame({
         "Feature": feats,

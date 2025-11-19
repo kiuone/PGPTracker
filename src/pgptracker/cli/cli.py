@@ -334,9 +334,9 @@ def main() -> int:
         return run_interactive_mode()
     
     args = parser.parse_args()
-
+    profile_name = getattr(args, 'profile', None)
     # Check if the --profile flag was used
-    if args.profile:
+    if profile_name:
         print(f"[INFO] Enabling profiler with preset: {args.profile}")
         use_preset(args.profile)
         MemoryProfiler.enable()
@@ -349,7 +349,7 @@ def main() -> int:
         exit_code = args.func(args)
         
         # This code only runs if args.func() completes successfully.
-        if args.profile and MemoryProfiler.is_enabled():
+        if profile_name and MemoryProfiler.is_enabled():
             MemoryProfiler.disable()
             
             config = get_config()

@@ -39,20 +39,16 @@ def _prepare_stats_long_df(
     
     if df_joined.height == 0:
         raise ValueError(
-            f"No samples matched between data and metadata on column '{sample_id_col}'."
-        )
+            f"No samples matched between data and metadata on column '{sample_id_col}'.")
 
     # Unpivot (melt) to long format
-    feature_cols = [
-        c for c in df_wide_N_D.columns if c != sample_id_col
-    ]
+    feature_cols = [c for c in df_wide_N_D.columns if c != sample_id_col]
     
     df_long = df_joined.unpivot(
         index=[sample_id_col, group_col],
         on=feature_cols,
         variable_name=feature_col,
-        value_name=value_col
-    )
+        value_name=value_col)
     
     return df_long
 
@@ -83,8 +79,7 @@ def kruskal_wallis_test(
     try:
         df_long = _prepare_stats_long_df(
             df_wide_N_D, metadata, sample_id_col, 
-            feature_col, group_col, value_col
-        )
+            feature_col, group_col, value_col)
     except (KeyError, ValueError) as e:
         print(f"  -> Error preparing data: {e}")
         return pl.DataFrame(schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64})
@@ -101,8 +96,7 @@ def kruskal_wallis_test(
             
         group_arrays = [
             data.filter(pl.col(group_col) == g).get_column(value_col).to_numpy()
-            for g in groups
-        ]
+            for g in groups]
         
         # Remove empty arrays just in case
         group_arrays = [arr for arr in group_arrays if len(arr) > 0]
@@ -144,8 +138,7 @@ def mann_whitney_u_test(
     try:
         df_long = _prepare_stats_long_df(
             df_wide_N_D, metadata, sample_id_col, 
-            feature_col, group_col, value_col
-        )
+            feature_col, group_col, value_col)
     except (KeyError, ValueError) as e:
         print(f"  -> Error preparing data: {e}")
         return pl.DataFrame(schema={"Feature": pl.String, "test_statistic": pl.Float64, "p_value": pl.Float64})
