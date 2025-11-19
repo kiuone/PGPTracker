@@ -30,11 +30,27 @@ def render():
     is_stratified = format_type == "wide-stratified"
     format_type_normalized = "wide" if format_type in ["wide", "wide-stratified"] else format_type
 
+    # For WIDE-STRATIFIED: Extract separate lists of Taxons and PGPTs
+    taxon_list = []
+    pgpt_list = []
+    if is_stratified:
+        for col in feature_cols:
+            if '|' in col:
+                parts = col.split('|')
+                taxon = parts[0]
+                pgpt = '|'.join(parts[1:])  # In case there are multiple pipes
+                if taxon not in taxon_list:
+                    taxon_list.append(taxon)
+                if pgpt not in pgpt_list:
+                    pgpt_list.append(pgpt)
+        taxon_list = sorted(taxon_list)
+        pgpt_list = sorted(pgpt_list)
+
     # Show format info
     if format_type_normalized == "long":
         st.info("📊 **LONG/STRATIFIED Format** detected - Using Abundance column for visualization")
     elif is_stratified:
-        st.info("📊 **WIDE-STRATIFIED Format** detected - Features are Composite Keys (Taxon|PGPT)")
+        st.info(f"📊 **WIDE-STRATIFIED Format** - {len(taxon_list)} unique Taxons × {len(pgpt_list)} unique PGPTs = {len(feature_cols)} features")
     else:
         st.info("📊 **WIDE Format** detected - Each column is a separate feature")
 
@@ -58,37 +74,38 @@ def render():
                 options=feature_cols,
                 help="Select the taxonomic or functional stratification column (e.g., Taxonomy, PGPT)"
             )
+        elif is_stratified:
+            # For wide-stratified: Let user choose to view by Taxon OR PGPT
+            view_by = st.radio(
+                "View by:",
+                ["Taxon", "PGPT"],
+                horizontal=True,
+                help="Aggregate data by Taxon or by PGPT"
+            )
+
+            if view_by == "Taxon":
+                selected_entity = st.selectbox(
+                    "Select Taxon:",
+                    options=taxon_list,
+                    help="Choose a taxonomic group"
+                )
+                # This will be used to aggregate all columns starting with this taxon
+                feature_col = selected_entity
+            else:  # PGPT
+                selected_entity = st.selectbox(
+                    "Select PGPT:",
+                    options=pgpt_list,
+                    help="Choose a functional category"
+                )
+                # This will be used to aggregate all columns ending with this PGPT
+                feature_col = selected_entity
         else:
-            # For wide format, select numeric feature column
-            # If wide-stratified, add search filter
-            if is_stratified:
-                st.markdown("**🔍 Search Features** (Composite Keys: Taxon|PGPT)")
-                search_term = st.text_input(
-                    "Filter by keyword:",
-                    "",
-                    help="Search for specific taxon or function (e.g., 'Bacteroidaceae', 'NITROGEN')",
-                    key="feature_search"
-                )
-
-                if search_term:
-                    filtered_features = [f for f in feature_cols if search_term.lower() in f.lower()]
-                    if not filtered_features:
-                        st.warning(f"No features found matching '{search_term}'")
-                        filtered_features = feature_cols
-                else:
-                    filtered_features = feature_cols
-
-                feature_col = st.selectbox(
-                    f"Feature (Abundance) - {len(filtered_features)} shown:",
-                    options=filtered_features,
-                    help="Select a feature to visualize"
-                )
-            else:
-                feature_col = st.selectbox(
-                    "Feature (Abundance):",
-                    options=feature_cols,
-                    help="Select a feature to visualize"
-                )
+            # Regular wide format
+            feature_col = st.selectbox(
+                "Feature (Abundance):",
+                options=feature_cols,
+                help="Select a feature to visualize"
+            )
 
     # Visualization tabs
     viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
@@ -125,17 +142,51 @@ def render():
                 st.error("⚠️ Could not find Abundance/Count/Value column in data")
                 fig = None
         else:
-            st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
+            # WIDE or WIDE-STRATIFIED format
+            if is_stratified:
+                # Aggregate columns for selected taxon or PGPT
+                st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
 
-            # Create boxplot with points (Plotly 5.18+ supports Polars directly)
-            fig = px.box(
-                df_merged,
-                x=group_col,
-                y=feature_col,
-                color=group_col,
-                points="all",  # Show all points
-                title=f"Distribution of {feature_col} by {group_col}"
-            )
+                # Find all columns that match the selected entity
+                if view_by == "Taxon":
+                    # Get all columns starting with "taxon|"
+                    matching_cols = [col for col in feature_cols if col.startswith(feature_col + '|')]
+                else:  # PGPT
+                    # Get all columns ending with "|pgpt"
+                    matching_cols = [col for col in feature_cols if col.endswith('|' + feature_col)]
+
+                if matching_cols:
+                    # Sum abundances across matching columns for each sample
+                    df_plot = df_merged.with_columns(
+                        pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                    )
+
+                    st.caption(f"📊 Aggregating {len(matching_cols)} features: {view_by} = {feature_col}")
+
+                    # Create boxplot with aggregated values
+                    fig = px.box(
+                        df_plot,
+                        x=group_col,
+                        y="Aggregated_Abundance",
+                        color=group_col,
+                        points="all",
+                        title=f"Distribution of {feature_col} ({view_by}) by {group_col}"
+                    )
+                else:
+                    st.error(f"⚠️ No features found for {view_by} = {feature_col}")
+                    fig = None
+            else:
+                # Regular wide format
+                st.markdown(f"### Distribution of **{feature_col}** by **{group_col}**")
+
+                fig = px.box(
+                    df_merged,
+                    x=group_col,
+                    y=feature_col,
+                    color=group_col,
+                    points="all",  # Show all points
+                    title=f"Distribution of {feature_col} by {group_col}"
+                )
 
         if fig:
             fig.update_layout(
@@ -253,9 +304,65 @@ def render():
 
                 st.caption(f"📊 Showing {len(df_scatter)} samples")
 
+        elif is_stratified:
+            # WIDE-STRATIFIED: Taxon vs PGPT scatter plot
+            st.info("🔬 **WIDE-STRATIFIED Mode**: Compare Taxon abundance vs PGPT abundance across samples")
+
+            col_x, col_y, col_color = st.columns(3)
+
+            with col_x:
+                selected_taxon = st.selectbox(
+                    "X-axis (Taxon):",
+                    options=taxon_list,
+                    key="scatter_taxon",
+                    help="Select a taxonomic group"
+                )
+
+            with col_y:
+                selected_pgpt = st.selectbox(
+                    "Y-axis (PGPT):",
+                    options=pgpt_list,
+                    key="scatter_pgpt",
+                    help="Select a functional category"
+                )
+
+            with col_color:
+                scatter_color = st.selectbox(
+                    "Color by:",
+                    options=["None"] + metadata_cols,
+                    key="scatter_color_strat"
+                )
+
+            # Aggregate columns for selected taxon and PGPT
+            # Find all columns for the taxon
+            taxon_cols = [col for col in feature_cols if col.startswith(selected_taxon + '|')]
+            pgpt_cols = [col for col in feature_cols if col.endswith('|' + selected_pgpt)]
+
+            if taxon_cols and pgpt_cols:
+                # Create aggregated dataframe
+                df_scatter = df_merged.select(["Sample"] + metadata_cols).with_columns([
+                    pl.sum_horizontal([pl.col(c) for c in taxon_cols]).alias("Taxon_Abundance"),
+                    pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
+                ])
+
+                st.caption(f"📊 Taxon: {len(taxon_cols)} features | PGPT: {len(pgpt_cols)} features")
+
+                # Create scatter plot
+                fig_scatter = px.scatter(
+                    df_scatter,
+                    x="Taxon_Abundance",
+                    y="PGPT_Abundance",
+                    color=scatter_color if scatter_color != "None" else None,
+                    hover_name="Sample",
+                    title=f"{selected_pgpt} vs {selected_taxon}",
+                    labels={"Taxon_Abundance": selected_taxon, "PGPT_Abundance": selected_pgpt}
+                )
+            else:
+                st.error(f"⚠️ No features found for Taxon={selected_taxon} or PGPT={selected_pgpt}")
+                fig_scatter = None
+
         else:
-            # WIDE FORMAT: Standard scatter (feature vs feature)
-            # Keep existing perfect logic
+            # REGULAR WIDE FORMAT: Standard scatter (feature vs feature)
             col_x, col_y, col_color = st.columns(3)
 
             with col_x:
@@ -290,31 +397,34 @@ def render():
                 title=f"{scatter_y} vs {scatter_x}"
             )
 
-        # Common styling for both modes
-        fig_scatter.update_traces(marker=dict(size=10, opacity=0.7))
-        fig_scatter.update_layout(
-            height=500,
-            template="plotly_white"
-        )
+        # Common styling and display
+        if fig_scatter is not None:
+            fig_scatter.update_traces(marker=dict(size=10, opacity=0.7))
+            fig_scatter.update_layout(
+                height=500,
+                template="plotly_white"
+            )
 
-        # High-resolution download config
-        if format_type_normalized == "long":
-            filename = f'scatter_{entity_y}_vs_{entity_x}_samples'
-        else:
-            filename = f'scatter_{scatter_y}_vs_{scatter_x}'
+            # High-resolution download config
+            if format_type_normalized == "long":
+                filename = f'scatter_{entity_y}_vs_{entity_x}_samples'
+            elif is_stratified:
+                filename = f'scatter_{selected_pgpt}_vs_{selected_taxon}'
+            else:
+                filename = f'scatter_{scatter_y}_vs_{scatter_x}'
 
-        config_scatter = {
-            'toImageButtonOptions': {
-                'format': 'png',
-                'filename': filename,
-                'height': 1080,
-                'width': 1920,
-                'scale': 2
-            },
-            'displayModeBar': True,
-            'displaylogo': False
-        }
-        st.plotly_chart(fig_scatter, width='stretch', config=config_scatter)
+            config_scatter = {
+                'toImageButtonOptions': {
+                    'format': 'png',
+                    'filename': filename,
+                    'height': 1080,
+                    'width': 1920,
+                    'scale': 2
+                },
+                'displayModeBar': True,
+                'displaylogo': False
+            }
+            st.plotly_chart(fig_scatter, width='stretch', config=config_scatter)
 
     with viz_tab3:
         st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
