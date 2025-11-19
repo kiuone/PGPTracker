@@ -6,6 +6,7 @@ import streamlit as st
 import plotly.express as px
 import plotly.graph_objects as go
 import polars as pl
+import numpy as np
 
 
 def render():
@@ -24,9 +25,16 @@ def render():
     feature_cols = st.session_state.feature_cols
     format_type = st.session_state.get('format_type', 'wide')
 
+    # Normalize format type: "wide-stratified" is treated as "wide" for visualization logic
+    # but we show the distinction to the user
+    is_stratified = format_type == "wide-stratified"
+    format_type_normalized = "wide" if format_type in ["wide", "wide-stratified"] else format_type
+
     # Show format info
-    if format_type == "long":
+    if format_type_normalized == "long":
         st.info("📊 **LONG/STRATIFIED Format** detected - Using Abundance column for visualization")
+    elif is_stratified:
+        st.info("📊 **WIDE-STRATIFIED Format** detected - Features are Composite Keys (Taxon|PGPT)")
     else:
         st.info("📊 **WIDE Format** detected - Each column is a separate feature")
 
@@ -43,7 +51,7 @@ def render():
         )
 
     with col2:
-        if format_type == "long":
+        if format_type_normalized == "long":
             # For long format, let user select taxonomic/functional column
             feature_col = st.selectbox(
                 "Stratification Column:",
@@ -67,7 +75,7 @@ def render():
     ])
 
     with viz_tab1:
-        if format_type == "long":
+        if format_type_normalized == "long":
             st.markdown(f"### Abundance Distribution by **{group_col}**")
             st.caption(f"Stratified by: {feature_col}")
 
@@ -186,7 +194,7 @@ def render():
         st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
 
         # Calculate summary statistics based on format
-        if format_type == "long":
+        if format_type_normalized == "long":
             # For long format, compute stats on Abundance column
             abundance_col = None
             for col in df_merged.columns:
@@ -246,12 +254,105 @@ def render():
         st.markdown("Run inferential tests to compare groups (using functions from `stage2_analysis/statistics.py`)")
 
         # Only available for wide format with numeric features
-        if format_type == "wide":
-            # Get unique groups
+        if format_type_normalized == "wide":
+            # CRITICAL: Detect if group_col is continuous or categorical
             unique_groups = df_merged[group_col].unique().to_list()
             num_groups = len(unique_groups)
 
-            st.info(f"🔢 Detected **{num_groups}** groups in **{group_col}**: {', '.join(map(str, unique_groups))}")
+            # Check if variable is continuous (>10 unique numeric values)
+            is_numeric = df_merged[group_col].dtype.is_numeric()
+            is_continuous = is_numeric and num_groups > 10
+
+            if is_continuous:
+                st.warning(f"⚠️ **{group_col}** appears to be a CONTINUOUS variable ({num_groups} unique values: {min(unique_groups):.2f} - {max(unique_groups):.2f})")
+                st.info("💡 **Recommendation:** Continuous variables (pH, temperature, etc.) should use **Correlation Analysis**, not group comparisons.")
+
+                # Offer correlation analysis instead
+                st.markdown("---")
+                st.markdown("#### 🔗 Correlation Analysis")
+                st.markdown(f"Compute correlations between **{group_col}** and all features")
+
+                corr_method = st.radio(
+                    "Correlation method:",
+                    ["Spearman (rank-based, robust)", "Pearson (linear)"],
+                    help="Spearman is recommended for non-normal distributions (microbiome data)"
+                )
+
+                if st.button("🧪 Run Correlation Analysis", type="primary"):
+                    with st.spinner("Computing correlations..."):
+                        import scipy.stats as ss
+
+                        # Extract continuous variable values
+                        metadata_values = df_merged[group_col].to_numpy()
+
+                        # Compute correlation for each feature
+                        correlation_results = []
+                        for feat in feature_cols:
+                            feature_values = df_merged[feat].to_numpy()
+
+                            # Remove NaN pairs
+                            mask = ~(np.isnan(metadata_values) | np.isnan(feature_values))
+                            if mask.sum() < 3:  # Need at least 3 points
+                                continue
+
+                            x = metadata_values[mask]
+                            y = feature_values[mask]
+
+                            if "Spearman" in corr_method:
+                                corr, pval = ss.spearmanr(x, y)
+                            else:
+                                corr, pval = ss.pearsonr(x, y)
+
+                            correlation_results.append({
+                                "Feature": feat,
+                                "correlation": corr,
+                                "p_value": pval
+                            })
+
+                        # Convert to Polars DataFrame
+                        results = pl.DataFrame(correlation_results)
+
+                        # Add FDR correction
+                        q_values = fdr_correction(results["p_value"], method='fdr_bh', alpha=0.05)
+                        results = results.with_columns(q_values.alias("q_value"))
+
+                        # Add significance markers
+                        results = results.with_columns([
+                            (pl.col("p_value") < 0.05).alias("p_sig"),
+                            (pl.col("q_value") < 0.05).alias("q_sig"),
+                            pl.col("correlation").abs().alias("abs_correlation")
+                        ])
+
+                        st.success(f"✅ Correlation analysis completed for {results.height} features!")
+
+                        # Summary metrics
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Total Features", results.height)
+                        with col2:
+                            n_p_sig = results.filter(pl.col("p_sig")).height
+                            st.metric("p < 0.05", f"{n_p_sig} ({100*n_p_sig/results.height:.1f}%)")
+                        with col3:
+                            n_q_sig = results.filter(pl.col("q_sig")).height
+                            st.metric("q < 0.05 (FDR)", f"{n_q_sig} ({100*n_q_sig/results.height:.1f}%)")
+
+                        # Show top correlations
+                        results_sorted = results.sort("abs_correlation", descending=True)
+                        st.dataframe(results_sorted, width='stretch', height=400)
+
+                        # Download button
+                        csv_stats = results_sorted.write_csv()
+                        st.download_button(
+                            label="📥 Download Correlation Results as CSV",
+                            data=csv_stats,
+                            file_name=f"correlation_{group_col}_{corr_method.split()[0]}.csv",
+                            mime="text/csv"
+                        )
+
+                # Don't show group comparison tests for continuous variables
+                test_options = []
+            else:
+                st.info(f"🔢 Detected **{num_groups}** groups in **{group_col}**: {', '.join(map(str, unique_groups[:10]))}{' ...' if num_groups > 10 else ''}")
 
             # Select test type
             if num_groups >= 3:
@@ -289,10 +390,9 @@ def render():
                                 value_col="Abundance"
                             )
 
-                            # Add FDR correction
-                            results = results.with_columns(
-                                fdr_correction(pl.col("p_value"), method='fdr_bh', alpha=0.05).alias("q_value")
-                            )
+                            # Add FDR correction - CRITICAL: pass materialized Series, not Expression
+                            q_values = fdr_correction(results["p_value"], method='fdr_bh', alpha=0.05)
+                            results = results.with_columns(q_values.alias("q_value"))
 
                             # Add significance markers
                             results = results.with_columns([
@@ -322,10 +422,9 @@ def render():
                                     group_2=group_2
                                 )
 
-                                # Add FDR correction
-                                results = results.with_columns(
-                                    fdr_correction(pl.col("p_value"), method='fdr_bh', alpha=0.05).alias("q_value")
-                                )
+                                # Add FDR correction - CRITICAL: pass materialized Series, not Expression
+                                q_values = fdr_correction(results["p_value"], method='fdr_bh', alpha=0.05)
+                                results = results.with_columns(q_values.alias("q_value"))
 
                                 # Add significance markers
                                 results = results.with_columns([
@@ -377,7 +476,7 @@ def render():
 
     with st.expander("⚖️ Compare Features", expanded=False):
         # Let user select multiple features to compare
-        if format_type == "wide":
+        if format_type_normalized == "wide":
             # For wide format, select multiple feature columns
             num_features = st.slider(
                 "Number of features to compare:",
@@ -430,7 +529,7 @@ def render():
                         'displayModeBar': True,
                         'displaylogo': False
                     }
-                    st.plotly_chart(fig_comp, use_container_width=True, config=config_comp)
+                    st.plotly_chart(fig_comp, width='stretch', config=config_comp)
 
                     # Mini summary stats
                     mini_stats = df_merged.group_by(group_col).agg([

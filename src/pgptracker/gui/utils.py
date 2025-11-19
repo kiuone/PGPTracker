@@ -54,18 +54,19 @@ def load_uploaded_file(uploaded_file) -> pl.DataFrame:
 
 def detect_table_format(df: pl.DataFrame, filename: Optional[str] = None) -> str:
     """
-    Detect if table is Wide (N×D) or Long/Stratified format.
+    Detect if table is Wide (N×D), Wide-Stratified (N×D with Taxon|PGPT), or Long/Stratified format.
 
     Detection strategy (in order of priority):
     1. Filename patterns (if provided) - following clr_normalize.py conventions
     2. Column structure analysis (fallback)
+    3. Composite Key detection (| in column names)
 
     Args:
         df: Polars DataFrame
         filename: Optional filename to use for pattern matching
 
     Returns:
-        "wide" or "long"
+        "wide", "wide-stratified", or "long"
     """
     # Priority 1: Filename-based detection (most reliable)
     if filename:
@@ -75,9 +76,23 @@ def detect_table_format(df: pl.DataFrame, filename: Optional[str] = None) -> str
         # raw_long_*, *_stratified_*, *stratified* = long format
         # raw_wide_*, clr_wide_*, *unstratified* = wide format
         if any(pattern in filename_lower for pattern in ['raw_long', 'stratified']):
-            return "long"
+            # Check if it's wide-stratified (filename has 'stratified' but format is wide)
+            cols = df.columns
+            cols_lower = [c.lower() for c in cols]
+            has_sample = any('sample' in c for c in cols_lower)
+            has_abundance = any(c in cols_lower for c in ['abundance', 'count', 'value', 'total_pgpt_abundance'])
+
+            if not (has_sample and has_abundance):
+                # It's stratified in wide format (pivoted)
+                # Check for composite keys
+                has_pipe = any('|' in str(col) for col in df.columns if col != 'Sample')
+                return "wide-stratified" if has_pipe else "wide"
+            else:
+                return "long"
         elif any(pattern in filename_lower for pattern in ['raw_wide', 'clr_wide', 'unstratified']):
-            return "wide"
+            # Check for composite keys even in "unstratified" files
+            has_pipe = any('|' in str(col) for col in df.columns if col != 'Sample')
+            return "wide-stratified" if has_pipe else "wide"
 
     # Priority 2: Column-based detection (fallback)
     # Long format indicators: has Sample + Abundance + (Taxonomy/PGPT/Feature)
@@ -89,11 +104,12 @@ def detect_table_format(df: pl.DataFrame, filename: Optional[str] = None) -> str
     has_taxonomy = any(c in cols_lower for c in ['taxonomy', 'taxon', 'feature', 'pgpt', 'function', 'family', 'lv3'])
 
     # Long format: has explicit Sample, Abundance/Value, and Feature identifier columns
-    # Wide format: Sample is first column, rest are numeric feature columns
     if has_sample and has_abundance and has_taxonomy:
         return "long"
     else:
-        return "wide"
+        # Wide format: check for composite keys (Taxon|PGPT)
+        has_pipe = any('|' in str(col) for col in df.columns if col.lower() != 'sample')
+        return "wide-stratified" if has_pipe else "wide"
 
 
 def auto_detect_sample_column(columns: List[str]) -> Optional[str]:
