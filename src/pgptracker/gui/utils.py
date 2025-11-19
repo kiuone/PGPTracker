@@ -177,7 +177,8 @@ def merge_data(
     if format_type == "long":
         # For long format, feature_cols are categorical columns (Taxonomy, PGPT, etc.)
         feature_cols = [col for col in df_clr.columns
-                       if col not in ["Sample", "Abundance", "abundance", "Count", "count", "Value", "value"]]
+                       if col not in ["Sample", "Abundance", "abundance", "Count", "count", "Value", "value",
+                                     "Total_PGPT_Abundance", "total_pgpt_abundance"]]
     else:
         # For wide format, feature_cols are all numeric columns except Sample
         feature_cols = [col for col in df_clr.columns if col != "Sample"]

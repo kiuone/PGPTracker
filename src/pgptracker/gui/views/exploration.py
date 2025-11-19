@@ -60,11 +60,35 @@ def render():
             )
         else:
             # For wide format, select numeric feature column
-            feature_col = st.selectbox(
-                "Feature (Abundance):",
-                options=feature_cols,
-                help="Select a feature to visualize"
-            )
+            # If wide-stratified, add search filter
+            if is_stratified:
+                st.markdown("**🔍 Search Features** (Composite Keys: Taxon|PGPT)")
+                search_term = st.text_input(
+                    "Filter by keyword:",
+                    "",
+                    help="Search for specific taxon or function (e.g., 'Bacteroidaceae', 'NITROGEN')",
+                    key="feature_search"
+                )
+
+                if search_term:
+                    filtered_features = [f for f in feature_cols if search_term.lower() in f.lower()]
+                    if not filtered_features:
+                        st.warning(f"No features found matching '{search_term}'")
+                        filtered_features = feature_cols
+                else:
+                    filtered_features = feature_cols
+
+                feature_col = st.selectbox(
+                    f"Feature (Abundance) - {len(filtered_features)} shown:",
+                    options=filtered_features,
+                    help="Select a feature to visualize"
+                )
+            else:
+                feature_col = st.selectbox(
+                    "Feature (Abundance):",
+                    options=feature_cols,
+                    help="Select a feature to visualize"
+                )
 
     # Visualization tabs
     viz_tab1, viz_tab2, viz_tab3, viz_tab4 = st.tabs([
@@ -80,10 +104,10 @@ def render():
             st.caption(f"Stratified by: {feature_col}")
 
             # For long format, use Abundance column
-            # Detect abundance column name
+            # Detect abundance column name (PGPTracker uses Total_PGPT_Abundance)
             abundance_col = None
             for col in df_merged.columns:
-                if col.lower() in ['abundance', 'count', 'value']:
+                if col.lower() in ['abundance', 'count', 'value', 'total_pgpt_abundance']:
                     abundance_col = col
                     break
 
@@ -136,40 +160,137 @@ def render():
     with viz_tab2:
         st.markdown("### Scatter Plot")
 
-        col_x, col_y, col_color = st.columns(3)
+        if format_type_normalized == "long":
+            # LONG FORMAT: Cross-Feature Analysis (Taxon vs PGPT)
+            # Allows plotting "Bacteroidaceae abundance" vs "NITROGEN_FIXATION abundance"
+            # where dots are SAMPLES
+            st.info("🔬 **LONG Format Mode**: Compare abundances of different entities across samples")
 
-        with col_x:
-            scatter_x = st.selectbox(
-                "X-axis:",
-                options=feature_cols,
-                key="scatter_x"
+            # Detect abundance column
+            abundance_col = None
+            for col in df_merged.columns:
+                if col.lower() in ['abundance', 'count', 'value', 'total_pgpt_abundance']:
+                    abundance_col = col
+                    break
+
+            if not abundance_col:
+                st.error("⚠️ Could not find abundance column")
+            else:
+                # Get all unique values from all feature columns combined
+                # This allows selecting any Taxon or PGPT value
+                all_entities = {}
+                for feat_col in feature_cols:
+                    unique_vals = df_merged[feat_col].unique().to_list()
+                    for val in unique_vals:
+                        if val not in all_entities:
+                            all_entities[val] = feat_col  # Store which column it came from
+
+                entity_list = sorted(all_entities.keys())
+
+                col_x, col_y, col_color = st.columns(3)
+
+                with col_x:
+                    entity_x = st.selectbox(
+                        "X-axis Entity (Taxon or PGPT):",
+                        options=entity_list,
+                        key="scatter_entity_x",
+                        help="Select a taxonomic group or functional category"
+                    )
+
+                with col_y:
+                    entity_y = st.selectbox(
+                        "Y-axis Entity (Taxon or PGPT):",
+                        options=entity_list,
+                        index=min(1, len(entity_list) - 1),
+                        key="scatter_entity_y",
+                        help="Select a different taxonomic group or functional category"
+                    )
+
+                with col_color:
+                    scatter_color = st.selectbox(
+                        "Color by (Metadata):",
+                        options=["None"] + metadata_cols,
+                        key="scatter_color_long"
+                    )
+
+                # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
+                # Step A: Get abundances for entity X across samples
+                col_x_source = all_entities[entity_x]
+                df_x = (
+                    df_merged
+                    .filter(pl.col(col_x_source) == entity_x)
+                    .group_by("Sample")
+                    .agg(pl.col(abundance_col).sum().alias("Value_X"))
+                )
+
+                # Step B: Get abundances for entity Y across samples
+                col_y_source = all_entities[entity_y]
+                df_y = (
+                    df_merged
+                    .filter(pl.col(col_y_source) == entity_y)
+                    .group_by("Sample")
+                    .agg(pl.col(abundance_col).sum().alias("Value_Y"))
+                )
+
+                # Step C: Join X and Y
+                df_scatter = df_x.join(df_y, on="Sample", how="inner")
+
+                # Step D: Join with metadata for coloring
+                if scatter_color != "None":
+                    df_metadata_subset = df_merged.select(["Sample", scatter_color]).unique()
+                    df_scatter = df_scatter.join(df_metadata_subset, on="Sample", how="left")
+
+                # Create scatter plot with samples as dots
+                fig_scatter = px.scatter(
+                    df_scatter,
+                    x="Value_X",
+                    y="Value_Y",
+                    color=scatter_color if scatter_color != "None" else None,
+                    hover_name="Sample",
+                    title=f"{entity_y} vs {entity_x} (Dots = Samples)",
+                    labels={"Value_X": entity_x, "Value_Y": entity_y}
+                )
+
+                st.caption(f"📊 Showing {len(df_scatter)} samples")
+
+        else:
+            # WIDE FORMAT: Standard scatter (feature vs feature)
+            # Keep existing perfect logic
+            col_x, col_y, col_color = st.columns(3)
+
+            with col_x:
+                scatter_x = st.selectbox(
+                    "X-axis:",
+                    options=feature_cols,
+                    key="scatter_x"
+                )
+
+            with col_y:
+                scatter_y = st.selectbox(
+                    "Y-axis:",
+                    options=feature_cols,
+                    index=min(1, len(feature_cols) - 1),
+                    key="scatter_y"
+                )
+
+            with col_color:
+                scatter_color = st.selectbox(
+                    "Color by:",
+                    options=["None"] + metadata_cols,
+                    key="scatter_color"
+                )
+
+            # Create scatter plot (Plotly supports Polars)
+            fig_scatter = px.scatter(
+                df_merged,
+                x=scatter_x,
+                y=scatter_y,
+                color=scatter_color if scatter_color != "None" else None,
+                hover_name="Sample" if "Sample" in df_merged.columns else None,
+                title=f"{scatter_y} vs {scatter_x}"
             )
 
-        with col_y:
-            scatter_y = st.selectbox(
-                "Y-axis:",
-                options=feature_cols,
-                index=min(1, len(feature_cols) - 1),
-                key="scatter_y"
-            )
-
-        with col_color:
-            scatter_color = st.selectbox(
-                "Color by:",
-                options=["None"] + metadata_cols,
-                key="scatter_color"
-            )
-
-        # Create scatter plot (Plotly supports Polars)
-        fig_scatter = px.scatter(
-            df_merged,
-            x=scatter_x,
-            y=scatter_y,
-            color=scatter_color if scatter_color != "None" else None,
-            hover_name="Sample" if "Sample" in df_merged.columns else None,
-            title=f"{scatter_y} vs {scatter_x}"
-        )
-
+        # Common styling for both modes
         fig_scatter.update_traces(marker=dict(size=10, opacity=0.7))
         fig_scatter.update_layout(
             height=500,
@@ -177,10 +298,15 @@ def render():
         )
 
         # High-resolution download config
+        if format_type_normalized == "long":
+            filename = f'scatter_{entity_y}_vs_{entity_x}_samples'
+        else:
+            filename = f'scatter_{scatter_y}_vs_{scatter_x}'
+
         config_scatter = {
             'toImageButtonOptions': {
                 'format': 'png',
-                'filename': f'scatter_{scatter_y}_vs_{scatter_x}',
+                'filename': filename,
                 'height': 1080,
                 'width': 1920,
                 'scale': 2
@@ -198,7 +324,7 @@ def render():
             # For long format, compute stats on Abundance column
             abundance_col = None
             for col in df_merged.columns:
-                if col.lower() in ['abundance', 'count', 'value']:
+                if col.lower() in ['abundance', 'count', 'value', 'total_pgpt_abundance']:
                     abundance_col = col
                     break
 

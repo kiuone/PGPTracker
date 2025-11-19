@@ -4,6 +4,12 @@
 # Increase max upload size to 2GB for large microbiome tables
 maxUploadSize = 2000
 
+# Increase max message size to 1GB for bioinformatics data (stratified tables)
+maxMessageSize = 1000
+
+# Disable CORS for local use
+enableCORS = false
+
 # Run in headless mode for server deployments
 headless = true
 
