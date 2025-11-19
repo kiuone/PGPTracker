@@ -221,7 +221,7 @@ def render():
             # LONG FORMAT: Cross-Feature Analysis (Taxon vs PGPT)
             # Allows plotting "Bacteroidaceae abundance" vs "NITROGEN_FIXATION abundance"
             # where dots are SAMPLES
-            st.info("🔬 **LONG Format Mode**: Compare abundances of different entities across samples")
+            st.info("🔬 **LONG Format Mode**: Compare Taxon abundance vs PGPT abundance across samples")
 
             # Detect abundance column
             abundance_col = None
@@ -233,86 +233,180 @@ def render():
             if not abundance_col:
                 st.error("⚠️ Could not find abundance column")
             else:
-                # Get all unique values from all feature columns combined
-                # This allows selecting any Taxon or PGPT value
-                all_entities = {}
-                for feat_col in feature_cols:
-                    unique_vals = df_merged[feat_col].unique().to_list()
-                    for val in unique_vals:
-                        if val not in all_entities:
-                            all_entities[val] = feat_col  # Store which column it came from
+                # Separate Taxon and PGPT columns
+                # Common taxonomy column names: Taxonomy, Taxon, Family, LV3, Genus, Species
+                # Common PGPT column names: PGPT, Function, Pathway, Feature
+                taxon_col = None
+                pgpt_col = None
 
-                entity_list = sorted(all_entities.keys())
+                for col in feature_cols:
+                    col_lower = col.lower()
+                    if any(tax in col_lower for tax in ['taxonomy', 'taxon', 'family', 'lv3', 'genus', 'species']):
+                        taxon_col = col
+                    elif any(func in col_lower for func in ['pgpt', 'function', 'pathway', 'feature']):
+                        pgpt_col = col
 
-                if not entity_list:
-                    st.error("⚠️ **No entities found**: The feature columns appear to be empty")
-                    st.stop()
+                # If we found both Taxon and PGPT columns, use separated lists
+                if taxon_col and pgpt_col:
+                    # Extract unique values for each
+                    taxon_values = sorted(df_merged[taxon_col].unique().to_list())
+                    pgpt_values = sorted(df_merged[pgpt_col].unique().to_list())
 
-                col_x, col_y, col_color = st.columns(3)
+                    if not taxon_values or not pgpt_values:
+                        st.error("⚠️ **No entities found**: The feature columns appear to be empty")
+                        st.stop()
 
-                with col_x:
-                    entity_x = st.selectbox(
-                        "X-axis Entity (Taxon or PGPT):",
-                        options=entity_list,
-                        key="scatter_entity_x",
-                        help="Select a taxonomic group or functional category"
+                    col_x, col_y, col_color = st.columns(3)
+
+                    with col_x:
+                        selected_taxon = st.selectbox(
+                            "X-axis (Taxon):",
+                            options=taxon_values,
+                            key="scatter_taxon_long",
+                            help="Select a taxonomic group"
+                        )
+
+                    with col_y:
+                        selected_pgpt = st.selectbox(
+                            "Y-axis (PGPT):",
+                            options=pgpt_values,
+                            key="scatter_pgpt_long",
+                            help="Select a functional category"
+                        )
+
+                    with col_color:
+                        scatter_color = st.selectbox(
+                            "Color by:",
+                            options=["None"] + metadata_cols,
+                            key="scatter_color_long"
+                        )
+
+                    # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
+                    # Step A: Get abundances for selected taxon across samples
+                    df_x = (
+                        df_merged
+                        .filter(pl.col(taxon_col) == selected_taxon)
+                        .group_by("Sample")
+                        .agg(pl.col(abundance_col).sum().alias("Taxon_Abundance"))
                     )
 
-                with col_y:
-                    entity_y = st.selectbox(
-                        "Y-axis Entity (Taxon or PGPT):",
-                        options=entity_list,
-                        index=min(1, len(entity_list) - 1),
-                        key="scatter_entity_y",
-                        help="Select a different taxonomic group or functional category"
+                    # Step B: Get abundances for selected PGPT across samples
+                    df_y = (
+                        df_merged
+                        .filter(pl.col(pgpt_col) == selected_pgpt)
+                        .group_by("Sample")
+                        .agg(pl.col(abundance_col).sum().alias("PGPT_Abundance"))
                     )
 
-                with col_color:
-                    scatter_color = st.selectbox(
-                        "Color by (Metadata):",
-                        options=["None"] + metadata_cols,
-                        key="scatter_color_long"
+                    # Step C: Join X and Y
+                    df_scatter = df_x.join(df_y, on="Sample", how="inner")
+
+                    # Count how many rows contributed to each aggregation
+                    n_taxon_rows = df_merged.filter(pl.col(taxon_col) == selected_taxon).height
+                    n_pgpt_rows = df_merged.filter(pl.col(pgpt_col) == selected_pgpt).height
+
+                    # Step D: Join with metadata for coloring
+                    if scatter_color != "None":
+                        df_metadata_subset = df_merged.select(["Sample", scatter_color]).unique()
+                        df_scatter = df_scatter.join(df_metadata_subset, on="Sample", how="left")
+
+                    st.caption(f"📊 Aggregating '{selected_taxon}' ({n_taxon_rows} rows) vs '{selected_pgpt}' ({n_pgpt_rows} rows)")
+
+                    # Create scatter plot
+                    fig_scatter = px.scatter(
+                        df_scatter,
+                        x="Taxon_Abundance",
+                        y="PGPT_Abundance",
+                        color=scatter_color if scatter_color != "None" else None,
+                        hover_name="Sample",
+                        title=f"{selected_pgpt} vs {selected_taxon} (Dots = Samples)",
+                        labels={"Taxon_Abundance": selected_taxon, "PGPT_Abundance": selected_pgpt}
                     )
 
-                # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
-                # Step A: Get abundances for entity X across samples
-                col_x_source = all_entities[entity_x]
-                df_x = (
-                    df_merged
-                    .filter(pl.col(col_x_source) == entity_x)
-                    .group_by("Sample")
-                    .agg(pl.col(abundance_col).sum().alias("Value_X"))
-                )
+                    st.caption(f"📊 Showing {len(df_scatter)} samples")
 
-                # Step B: Get abundances for entity Y across samples
-                col_y_source = all_entities[entity_y]
-                df_y = (
-                    df_merged
-                    .filter(pl.col(col_y_source) == entity_y)
-                    .group_by("Sample")
-                    .agg(pl.col(abundance_col).sum().alias("Value_Y"))
-                )
+                else:
+                    # Fallback: Use old generic entity selection if can't separate Taxon/PGPT
+                    st.warning(f"⚠️ Could not detect separate Taxon and PGPT columns. Using generic entity selection.")
+                    st.info(f"Detected feature columns: {feature_cols}")
 
-                # Step C: Join X and Y
-                df_scatter = df_x.join(df_y, on="Sample", how="inner")
+                    # Get all unique values from all feature columns combined
+                    all_entities = {}
+                    for feat_col in feature_cols:
+                        unique_vals = df_merged[feat_col].unique().to_list()
+                        for val in unique_vals:
+                            if val not in all_entities:
+                                all_entities[val] = feat_col
 
-                # Step D: Join with metadata for coloring
-                if scatter_color != "None":
-                    df_metadata_subset = df_merged.select(["Sample", scatter_color]).unique()
-                    df_scatter = df_scatter.join(df_metadata_subset, on="Sample", how="left")
+                    entity_list = sorted(all_entities.keys())
 
-                # Create scatter plot with samples as dots
-                fig_scatter = px.scatter(
-                    df_scatter,
-                    x="Value_X",
-                    y="Value_Y",
-                    color=scatter_color if scatter_color != "None" else None,
-                    hover_name="Sample",
-                    title=f"{entity_y} vs {entity_x} (Dots = Samples)",
-                    labels={"Value_X": entity_x, "Value_Y": entity_y}
-                )
+                    if not entity_list:
+                        st.error("⚠️ **No entities found**: The feature columns appear to be empty")
+                        st.stop()
 
-                st.caption(f"📊 Showing {len(df_scatter)} samples")
+                    col_x, col_y, col_color = st.columns(3)
+
+                    with col_x:
+                        entity_x = st.selectbox(
+                            "X-axis Entity:",
+                            options=entity_list,
+                            key="scatter_entity_x",
+                            help="Select an entity"
+                        )
+
+                    with col_y:
+                        entity_y = st.selectbox(
+                            "Y-axis Entity:",
+                            options=entity_list,
+                            index=min(1, len(entity_list) - 1),
+                            key="scatter_entity_y",
+                            help="Select a different entity"
+                        )
+
+                    with col_color:
+                        scatter_color = st.selectbox(
+                            "Color by (Metadata):",
+                            options=["None"] + metadata_cols,
+                            key="scatter_color_long"
+                        )
+
+                    # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
+                    col_x_source = all_entities[entity_x]
+                    df_x = (
+                        df_merged
+                        .filter(pl.col(col_x_source) == entity_x)
+                        .group_by("Sample")
+                        .agg(pl.col(abundance_col).sum().alias("Value_X"))
+                    )
+
+                    col_y_source = all_entities[entity_y]
+                    df_y = (
+                        df_merged
+                        .filter(pl.col(col_y_source) == entity_y)
+                        .group_by("Sample")
+                        .agg(pl.col(abundance_col).sum().alias("Value_Y"))
+                    )
+
+                    # Step C: Join X and Y
+                    df_scatter = df_x.join(df_y, on="Sample", how="inner")
+
+                    # Step D: Join with metadata for coloring
+                    if scatter_color != "None":
+                        df_metadata_subset = df_merged.select(["Sample", scatter_color]).unique()
+                        df_scatter = df_scatter.join(df_metadata_subset, on="Sample", how="left")
+
+                    # Create scatter plot with samples as dots
+                    fig_scatter = px.scatter(
+                        df_scatter,
+                        x="Value_X",
+                        y="Value_Y",
+                        color=scatter_color if scatter_color != "None" else None,
+                        hover_name="Sample",
+                        title=f"{entity_y} vs {entity_x} (Dots = Samples)",
+                        labels={"Value_X": entity_x, "Value_Y": entity_y}
+                    )
+
+                    st.caption(f"📊 Showing {len(df_scatter)} samples")
 
         elif is_stratified:
             # WIDE-STRATIFIED: Taxon vs PGPT scatter plot
@@ -344,8 +438,9 @@ def render():
                 )
 
             # Aggregate columns for selected taxon and PGPT
-            # Find all columns for the taxon
+            # Find all columns for the taxon (all PGPTs for this taxon)
             taxon_cols = [col for col in feature_cols if col.startswith(selected_taxon + '|')]
+            # Find all columns for the PGPT (all taxons with this PGPT)
             pgpt_cols = [col for col in feature_cols if col.endswith('|' + selected_pgpt)]
 
             if taxon_cols and pgpt_cols:
@@ -355,7 +450,7 @@ def render():
                     pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
                 ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
 
-                st.caption(f"📊 Taxon: {len(taxon_cols)} features | PGPT: {len(pgpt_cols)} features")
+                st.caption(f"📊 Aggregating '{selected_taxon}' across {len(taxon_cols)} PGPTs | '{selected_pgpt}' across {len(pgpt_cols)} Taxons")
 
                 # Create scatter plot
                 fig_scatter = px.scatter(
@@ -468,8 +563,34 @@ def render():
             else:
                 st.error("⚠️ Could not find Abundance/Count/Value column in data")
                 summary = None
+        elif is_stratified:
+            # For wide-stratified format, use the aggregated abundance column from boxplot
+            # Check if aggregated plot was created
+            if matching_cols:
+                df_aggregated = df_merged.with_columns(
+                    pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                )
+                summary = (
+                    df_aggregated
+                    .group_by(group_col)
+                    .agg([
+                        pl.col("Aggregated_Abundance").count().alias("N"),
+                        pl.col("Aggregated_Abundance").mean().alias("Mean"),
+                        pl.col("Aggregated_Abundance").std().alias("Std"),
+                        pl.col("Aggregated_Abundance").min().alias("Min"),
+                        pl.col("Aggregated_Abundance").median().alias("Median"),
+                        pl.col("Aggregated_Abundance").max().alias("Max"),
+                    ])
+                    .with_columns(
+                        (pl.col("Std") / pl.col("Mean") * 100).alias("CV%")
+                    )
+                    .sort(group_col)
+                )
+            else:
+                st.error(f"⚠️ No features found for {view_by} = {feature_col}")
+                summary = None
         else:
-            # For wide format, compute stats on selected feature column
+            # For regular wide format, compute stats on selected feature column
             summary = (
                 df_merged
                 .group_by(group_col)
