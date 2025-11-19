@@ -106,7 +106,7 @@ def render():
         st.markdown("### 👀 Data Preview")
         st.dataframe(
             st.session_state.df_merged.head(10),
-            use_container_width=True,
+            width='stretch',
             height=300
         )
 
@@ -153,9 +153,9 @@ def render():
                     df_metadata = utils.load_uploaded_file(metadata_file)
                     df_clr = utils.load_uploaded_file(clr_file)
 
-                    # Detect format
-                    format_type = utils.detect_table_format(df_clr)
-                    st.info(f"📊 Detected format: **{format_type.upper()}**")
+                    # Detect format (using filename for better accuracy)
+                    format_type = utils.detect_table_format(df_clr, filename=clr_file.name)
+                    st.info(f"📊 Detected format: **{format_type.upper()}** (from: {clr_file.name})")
 
                     # Let user select sample column
                     st.markdown("#### 3. Select Sample ID Column")

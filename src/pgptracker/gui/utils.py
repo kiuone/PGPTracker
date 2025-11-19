@@ -52,24 +52,44 @@ def load_uploaded_file(uploaded_file) -> pl.DataFrame:
     )
 
 
-def detect_table_format(df: pl.DataFrame) -> str:
+def detect_table_format(df: pl.DataFrame, filename: Optional[str] = None) -> str:
     """
     Detect if table is Wide (N×D) or Long/Stratified format.
 
+    Detection strategy (in order of priority):
+    1. Filename patterns (if provided) - following clr_normalize.py conventions
+    2. Column structure analysis (fallback)
+
     Args:
         df: Polars DataFrame
+        filename: Optional filename to use for pattern matching
 
     Returns:
         "wide" or "long"
     """
+    # Priority 1: Filename-based detection (most reliable)
+    if filename:
+        filename_lower = filename.lower()
+
+        # Patterns from clr_normalize.py:
+        # raw_long_*, *_stratified_*, *stratified* = long format
+        # raw_wide_*, clr_wide_*, *unstratified* = wide format
+        if any(pattern in filename_lower for pattern in ['raw_long', 'stratified']):
+            return "long"
+        elif any(pattern in filename_lower for pattern in ['raw_wide', 'clr_wide', 'unstratified']):
+            return "wide"
+
+    # Priority 2: Column-based detection (fallback)
     # Long format indicators: has Sample + Abundance + (Taxonomy/PGPT/Feature)
     cols = df.columns
     cols_lower = [c.lower() for c in cols]
 
     has_sample = any('sample' in c for c in cols_lower)
-    has_abundance = any(c in cols_lower for c in ['abundance', 'count', 'value'])
-    has_taxonomy = any(c in cols_lower for c in ['taxonomy', 'taxon', 'feature', 'pgpt', 'function'])
+    has_abundance = any(c in cols_lower for c in ['abundance', 'count', 'value', 'total_pgpt_abundance'])
+    has_taxonomy = any(c in cols_lower for c in ['taxonomy', 'taxon', 'feature', 'pgpt', 'function', 'family', 'lv3'])
 
+    # Long format: has explicit Sample, Abundance/Value, and Feature identifier columns
+    # Wide format: Sample is first column, rest are numeric feature columns
     if has_sample and has_abundance and has_taxonomy:
         return "long"
     else:
@@ -101,7 +121,8 @@ def auto_detect_sample_column(columns: List[str]) -> Optional[str]:
 def merge_data(
     df_clr: pl.DataFrame,
     df_metadata: pl.DataFrame,
-    metadata_sample_col: str
+    metadata_sample_col: str,
+    clr_filename: Optional[str] = None
 ) -> Tuple[pl.DataFrame, List[str], List[str], str]:
     """
     Merge CLR data with metadata, handling both wide and long formats.
@@ -110,12 +131,13 @@ def merge_data(
         df_clr: CLR-transformed data (wide or long format)
         df_metadata: Metadata DataFrame
         metadata_sample_col: Name of sample ID column in metadata
+        clr_filename: Optional filename for better format detection
 
     Returns:
         Tuple of (merged_df, metadata_columns, feature_columns, format_type)
     """
     # Detect format
-    format_type = detect_table_format(df_clr)
+    format_type = detect_table_format(df_clr, filename=clr_filename)
 
     # Auto-detect sample column in CLR data
     clr_sample_col = auto_detect_sample_column(df_clr.columns)

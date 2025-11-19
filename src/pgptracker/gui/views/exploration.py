@@ -106,7 +106,7 @@ def render():
                 showlegend=True,
                 template="plotly_white"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     with viz_tab2:
         st.markdown("### Scatter Plot")
@@ -151,7 +151,7 @@ def render():
             template="plotly_white"
         )
 
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width='stretch')
 
     with viz_tab3:
         st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
@@ -208,7 +208,7 @@ def render():
         if summary is not None:
             st.dataframe(
                 summary,
-                use_container_width=True,
+                width='stretch',
                 height=400
             )
 
@@ -252,7 +252,7 @@ def render():
     # Display table
     st.dataframe(
         df_filtered,
-        use_container_width=True,
+        width='stretch',
         height=400
     )
 
