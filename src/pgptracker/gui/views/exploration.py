@@ -58,13 +58,23 @@ def render():
                 help="Select a feature to visualize"
             )
 
+    # For long format, add a second selector to choose specific stratification value
+    feature_value = None
+    if format_type == "long" and feature_col:
+        unique_values = df_merged[feature_col].unique().to_list()
+        feature_value = st.selectbox(
+            f"Select Specific {feature_col}:",
+            options=sorted(unique_values),
+            help=f"Choose which {feature_col} to visualize"
+        )
+
     # Visualization tabs
     viz_tab1, viz_tab2, viz_tab3 = st.tabs(["📦 Boxplot", "📈 Scatter Plot", "📋 Summary Table"])
 
     with viz_tab1:
         if format_type == "long":
-            st.markdown(f"### Abundance Distribution by **{group_col}**")
-            st.caption(f"Stratified by: {feature_col}")
+            st.markdown(f"### Distribution of **{feature_value}** by **{group_col}**")
+            st.caption(f"Stratification type: {feature_col}")
 
             # For long format, use Abundance column
             # Detect abundance column name
@@ -74,15 +84,21 @@ def render():
                     abundance_col = col
                     break
 
-            if abundance_col:
+            if abundance_col and feature_value:
+                # CRITICAL FIX: Filter data for the selected feature value
+                df_filtered = df_merged.filter(pl.col(feature_col) == feature_value)
+
+                # Show count of filtered samples
+                st.caption(f"📊 Showing {len(df_filtered)} observations for this {feature_col}")
+
                 # Create boxplot with Abundance on y-axis
                 fig = px.box(
-                    df_merged,
+                    df_filtered,
                     x=group_col,
                     y=abundance_col,
                     color=group_col,
                     points="all",
-                    title=f"Abundance Distribution by {group_col}"
+                    title=f"Abundance of {feature_value} by {group_col}"
                 )
             else:
                 st.error("⚠️ Could not find Abundance/Count/Value column in data")
@@ -106,7 +122,7 @@ def render():
                 showlegend=True,
                 template="plotly_white"
             )
-            st.plotly_chart(fig, use_container_width=True)
+            st.plotly_chart(fig, width='stretch')
 
     with viz_tab2:
         st.markdown("### Scatter Plot")
@@ -151,23 +167,29 @@ def render():
             template="plotly_white"
         )
 
-        st.plotly_chart(fig_scatter, use_container_width=True)
+        st.plotly_chart(fig_scatter, width='stretch')
 
     with viz_tab3:
-        st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
+        if format_type == "long":
+            st.markdown(f"### Summary Statistics for **{feature_value}** by **{group_col}**")
+        else:
+            st.markdown(f"### Summary Statistics for **{feature_col}** by **{group_col}**")
 
         # Calculate summary statistics based on format
         if format_type == "long":
-            # For long format, compute stats on Abundance column
+            # For long format, compute stats on Abundance column (FILTERED by feature_value)
             abundance_col = None
             for col in df_merged.columns:
                 if col.lower() in ['abundance', 'count', 'value']:
                     abundance_col = col
                     break
 
-            if abundance_col:
+            if abundance_col and feature_value:
+                # CRITICAL FIX: Filter data for the selected feature value
+                df_filtered = df_merged.filter(pl.col(feature_col) == feature_value)
+
                 summary = (
-                    df_merged
+                    df_filtered
                     .group_by(group_col)
                     .agg([
                         pl.col(abundance_col).count().alias("N"),
@@ -208,7 +230,7 @@ def render():
         if summary is not None:
             st.dataframe(
                 summary,
-                use_container_width=True,
+                width='stretch',
                 height=400
             )
 
@@ -252,7 +274,7 @@ def render():
     # Display table
     st.dataframe(
         df_filtered,
-        use_container_width=True,
+        width='stretch',
         height=400
     )
 

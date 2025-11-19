@@ -106,7 +106,7 @@ def render():
         st.markdown("### 👀 Data Preview")
         st.dataframe(
             st.session_state.df_merged.head(10),
-            use_container_width=True,
+            width='stretch',
             height=300
         )
 
