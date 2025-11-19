@@ -46,6 +46,12 @@ def render():
         taxon_list = sorted(taxon_list)
         pgpt_list = sorted(pgpt_list)
 
+        # Safety check: ensure we have valid taxons and pgpts
+        if not taxon_list or not pgpt_list:
+            st.error(f"⚠️ **Invalid WIDE-STRATIFIED format**: Expected 'Taxon|PGPT' columns but found {len(taxon_list)} unique Taxons and {len(pgpt_list)} unique PGPTs")
+            st.info("Check that your column names follow the pattern: `TaxonName|PGPT_Name` (e.g., `Bacteroidaceae|NITROGEN_FIXATION`)")
+            st.stop()
+
     # Show format info
     if format_type_normalized == "long":
         st.info("📊 **LONG/STRATIFIED Format** detected - Using Abundance column for visualization")
@@ -238,6 +244,10 @@ def render():
 
                 entity_list = sorted(all_entities.keys())
 
+                if not entity_list:
+                    st.error("⚠️ **No entities found**: The feature columns appear to be empty")
+                    st.stop()
+
                 col_x, col_y, col_color = st.columns(3)
 
                 with col_x:
@@ -339,11 +349,11 @@ def render():
             pgpt_cols = [col for col in feature_cols if col.endswith('|' + selected_pgpt)]
 
             if taxon_cols and pgpt_cols:
-                # Create aggregated dataframe
-                df_scatter = df_merged.select(["Sample"] + metadata_cols).with_columns([
+                # Create aggregated dataframe - FIX: don't remove feature cols before summing them!
+                df_scatter = df_merged.with_columns([
                     pl.sum_horizontal([pl.col(c) for c in taxon_cols]).alias("Taxon_Abundance"),
                     pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
-                ])
+                ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
 
                 st.caption(f"📊 Taxon: {len(taxon_cols)} features | PGPT: {len(pgpt_cols)} features")
 
