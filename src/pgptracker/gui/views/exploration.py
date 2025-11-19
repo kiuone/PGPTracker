@@ -310,7 +310,7 @@ def render():
                         df_metadata_subset = df_merged.select(["Sample", scatter_color]).unique()
                         df_scatter = df_scatter.join(df_metadata_subset, on="Sample", how="left")
 
-                    st.caption(f"📊 Aggregating '{selected_taxon}' ({n_taxon_rows} rows) vs '{selected_pgpt}' ({n_pgpt_rows} rows)")
+                    st.caption(f"📊 X-axis: aggregating {n_taxon_rows} rows | Y-axis: aggregating {n_pgpt_rows} rows")
 
                     # Create scatter plot
                     fig_scatter = px.scatter(
@@ -450,7 +450,7 @@ def render():
                     pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
                 ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
 
-                st.caption(f"📊 Aggregating '{selected_taxon}' across {len(taxon_cols)} PGPTs | '{selected_pgpt}' across {len(pgpt_cols)} Taxons")
+                st.caption(f"📊 X-axis: summing {len(taxon_cols)} columns | Y-axis: summing {len(pgpt_cols)} columns")
 
                 # Create scatter plot
                 fig_scatter = px.scatter(
