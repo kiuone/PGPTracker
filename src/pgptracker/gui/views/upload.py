@@ -42,8 +42,8 @@ def auto_load_from_directory(results_dir: Path):
                 return
 
             # Merge data
-            df_merged, metadata_cols, feature_cols, format_type = utils.merge_data(
-                df_clr, df_metadata, metadata_sample_col
+            df_merged, metadata_cols, feature_cols, format_type, is_clr = utils.merge_data(
+                df_clr, df_metadata, metadata_sample_col, clr_filename="clr_wide_N_D.tsv"
             )
 
             # Store in session state
@@ -51,6 +51,7 @@ def auto_load_from_directory(results_dir: Path):
             st.session_state.metadata_cols = metadata_cols
             st.session_state.feature_cols = feature_cols
             st.session_state.format_type = format_type
+            st.session_state.is_clr = is_clr
             st.session_state.n_samples = df_merged.shape[0]
             st.session_state.n_features = len(feature_cols)
             st.session_state.n_metadata_cols = len(metadata_cols)
@@ -170,8 +171,8 @@ def render():
 
                     if st.button("✅ Load Data", type="primary"):
                         # Merge data
-                        df_merged, metadata_cols, feature_cols, format_type = utils.merge_data(
-                            df_clr, df_metadata, metadata_sample_col
+                        df_merged, metadata_cols, feature_cols, format_type, is_clr = utils.merge_data(
+                            df_clr, df_metadata, metadata_sample_col, clr_filename=clr_file.name
                         )
 
                         # Store in session state
@@ -179,12 +180,15 @@ def render():
                         st.session_state.metadata_cols = metadata_cols
                         st.session_state.feature_cols = feature_cols
                         st.session_state.format_type = format_type
+                        st.session_state.is_clr = is_clr
                         st.session_state.n_samples = df_merged.shape[0]
                         st.session_state.n_features = len(feature_cols)
                         st.session_state.n_metadata_cols = len(metadata_cols)
                         st.session_state.data_loaded = True
 
-                        st.success("✅ Data loaded successfully!")
+                        # Show data type detection result
+                        data_type = "CLR-transformed" if is_clr else "Raw counts"
+                        st.success(f"✅ Data loaded successfully! Detected: **{data_type}**")
                         st.rerun()
 
                 except Exception as e:

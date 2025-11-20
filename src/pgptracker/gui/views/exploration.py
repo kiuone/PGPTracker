@@ -24,6 +24,7 @@ def render():
     metadata_cols = st.session_state.metadata_cols
     feature_cols = st.session_state.feature_cols
     format_type = st.session_state.get('format_type', 'wide')
+    is_clr = st.session_state.get('is_clr', False)  # CLR IN -> CLR OUT guarantee
 
     # Normalize format type: "wide-stratified" is treated as "wide" for visualization logic
     # but we show the distinction to the user
@@ -162,12 +163,20 @@ def render():
                     matching_cols = [col for col in feature_cols if col.endswith('|' + feature_col)]
 
                 if matching_cols:
-                    # Sum abundances across matching columns for each sample
-                    df_plot = df_merged.with_columns(
-                        pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
-                    )
+                    # Aggregate abundances across matching columns for each sample
+                    # CLR data: use MEAN to preserve scale | Raw data: use SUM
+                    if is_clr:
+                        df_plot = df_merged.with_columns(
+                            pl.mean_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                        )
+                        agg_method = "MEAN"
+                    else:
+                        df_plot = df_merged.with_columns(
+                            pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                        )
+                        agg_method = "SUM"
 
-                    st.caption(f"📊 Aggregating {len(matching_cols)} features: {view_by} = {feature_col}")
+                    st.caption(f"📊 Aggregating {len(matching_cols)} features using {agg_method}: {view_by} = {feature_col}")
 
                     # Create boxplot with aggregated values
                     fig = px.box(
@@ -281,13 +290,16 @@ def render():
                             key="scatter_color_long"
                         )
 
-                    # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
+                    # Data transformation: Filter -> GroupBy Sample -> Aggregate Abundances -> Join
+                    # CLR data: use MEAN to preserve scale | Raw data: use SUM
+                    agg_func = pl.col(abundance_col).mean() if is_clr else pl.col(abundance_col).sum()
+
                     # Step A: Get abundances for selected taxon across samples
                     df_x = (
                         df_merged
                         .filter(pl.col(taxon_col) == selected_taxon)
                         .group_by("Sample")
-                        .agg(pl.col(abundance_col).sum().alias("Taxon_Abundance"))
+                        .agg(agg_func.alias("Taxon_Abundance"))
                     )
 
                     # Step B: Get abundances for selected PGPT across samples
@@ -295,7 +307,7 @@ def render():
                         df_merged
                         .filter(pl.col(pgpt_col) == selected_pgpt)
                         .group_by("Sample")
-                        .agg(pl.col(abundance_col).sum().alias("PGPT_Abundance"))
+                        .agg(agg_func.alias("PGPT_Abundance"))
                     )
 
                     # Step C: Join X and Y
@@ -370,13 +382,16 @@ def render():
                             key="scatter_color_long"
                         )
 
-                    # Data transformation: Filter -> GroupBy Sample -> Sum Abundances -> Join
+                    # Data transformation: Filter -> GroupBy Sample -> Aggregate Abundances -> Join
+                    # CLR data: use MEAN to preserve scale | Raw data: use SUM
+                    agg_func_fallback = pl.col(abundance_col).mean() if is_clr else pl.col(abundance_col).sum()
+
                     col_x_source = all_entities[entity_x]
                     df_x = (
                         df_merged
                         .filter(pl.col(col_x_source) == entity_x)
                         .group_by("Sample")
-                        .agg(pl.col(abundance_col).sum().alias("Value_X"))
+                        .agg(agg_func_fallback.alias("Value_X"))
                     )
 
                     col_y_source = all_entities[entity_y]
@@ -384,7 +399,7 @@ def render():
                         df_merged
                         .filter(pl.col(col_y_source) == entity_y)
                         .group_by("Sample")
-                        .agg(pl.col(abundance_col).sum().alias("Value_Y"))
+                        .agg(agg_func_fallback.alias("Value_Y"))
                     )
 
                     # Step C: Join X and Y
@@ -444,13 +459,22 @@ def render():
             pgpt_cols = [col for col in feature_cols if col.endswith('|' + selected_pgpt)]
 
             if taxon_cols and pgpt_cols:
-                # Create aggregated dataframe - FIX: don't remove feature cols before summing them!
-                df_scatter = df_merged.with_columns([
-                    pl.sum_horizontal([pl.col(c) for c in taxon_cols]).alias("Taxon_Abundance"),
-                    pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
-                ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
+                # Create aggregated dataframe
+                # CLR data: use MEAN to preserve scale | Raw data: use SUM
+                if is_clr:
+                    df_scatter = df_merged.with_columns([
+                        pl.mean_horizontal([pl.col(c) for c in taxon_cols]).alias("Taxon_Abundance"),
+                        pl.mean_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
+                    ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
+                    agg_method = "averaging"
+                else:
+                    df_scatter = df_merged.with_columns([
+                        pl.sum_horizontal([pl.col(c) for c in taxon_cols]).alias("Taxon_Abundance"),
+                        pl.sum_horizontal([pl.col(c) for c in pgpt_cols]).alias("PGPT_Abundance")
+                    ]).select(["Sample", "Taxon_Abundance", "PGPT_Abundance"] + metadata_cols)
+                    agg_method = "summing"
 
-                st.caption(f"📊 X-axis: summing {len(taxon_cols)} columns | Y-axis: summing {len(pgpt_cols)} columns")
+                st.caption(f"📊 X-axis: {agg_method} {len(taxon_cols)} columns | Y-axis: {agg_method} {len(pgpt_cols)} columns")
 
                 # Create scatter plot
                 fig_scatter = px.scatter(
@@ -567,9 +591,15 @@ def render():
             # For wide-stratified format, use the aggregated abundance column from boxplot
             # Check if aggregated plot was created
             if matching_cols:
-                df_aggregated = df_merged.with_columns(
-                    pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
-                )
+                # CLR data: use MEAN to preserve scale | Raw data: use SUM
+                if is_clr:
+                    df_aggregated = df_merged.with_columns(
+                        pl.mean_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                    )
+                else:
+                    df_aggregated = df_merged.with_columns(
+                        pl.sum_horizontal([pl.col(c) for c in matching_cols]).alias("Aggregated_Abundance")
+                    )
                 summary = (
                     df_aggregated
                     .group_by(group_col)

@@ -134,26 +134,94 @@ def auto_detect_sample_column(columns: List[str]) -> Optional[str]:
     return None
 
 
+def is_clr_transformed(df: pl.DataFrame, format_type: str, filename: Optional[str] = None) -> bool:
+    """
+    Detect if data is CLR-transformed or raw counts.
+
+    Detection strategy:
+    1. Filename contains 'clr' -> CLR
+    2. Has negative values -> CLR (raw counts are never negative)
+    3. All values are small floats (< 100) and has negatives -> CLR
+    4. Otherwise -> Raw
+
+    Args:
+        df: DataFrame to check
+        format_type: One of 'wide', 'wide-stratified', or 'long'
+        filename: Optional filename for pattern matching
+
+    Returns:
+        True if CLR-transformed, False if raw counts
+    """
+    # Check filename first (most reliable)
+    if filename and 'clr' in filename.lower():
+        return True
+    if filename and 'raw' in filename.lower():
+        return False
+
+    # Get numeric columns to check
+    if format_type == "long":
+        # For long format, check the abundance column
+        abundance_cols = [col for col in df.columns
+                         if col.lower() in ['abundance', 'count', 'value', 'total_pgpt_abundance']]
+        if not abundance_cols:
+            return False  # Can't determine, assume raw
+        check_col = abundance_cols[0]
+        values = df[check_col].drop_nulls()
+    else:
+        # For wide/wide-stratified, check feature columns (skip Sample column)
+        feature_cols = [col for col in df.columns if col.lower() != 'sample']
+        if not feature_cols:
+            return False
+        # Sample first numeric column
+        check_col = feature_cols[0]
+        values = df[check_col].drop_nulls()
+
+    # If we have values to check
+    if len(values) > 0:
+        # Check for negative values (CLR can be negative, raw counts cannot)
+        has_negative = (values < 0).any()
+        if has_negative:
+            return True
+
+        # Check typical value range
+        max_val = values.max()
+        min_val = values.min()
+
+        # CLR typically ranges from -10 to +10, raw counts can be thousands
+        if max_val < 100 and min_val >= -100:
+            # Likely CLR (small range)
+            return True
+        elif max_val > 1000:
+            # Likely raw counts (large values)
+            return False
+
+    # Default: assume raw if can't determine
+    return False
+
+
 def merge_data(
     df_clr: pl.DataFrame,
     df_metadata: pl.DataFrame,
     metadata_sample_col: str,
     clr_filename: Optional[str] = None
-) -> Tuple[pl.DataFrame, List[str], List[str], str]:
+) -> Tuple[pl.DataFrame, List[str], List[str], str, bool]:
     """
     Merge CLR data with metadata, handling both wide and long formats.
 
     Args:
-        df_clr: CLR-transformed data (wide or long format)
+        df_clr: CLR-transformed or raw data (wide or long format)
         df_metadata: Metadata DataFrame
         metadata_sample_col: Name of sample ID column in metadata
         clr_filename: Optional filename for better format detection
 
     Returns:
-        Tuple of (merged_df, metadata_columns, feature_columns, format_type)
+        Tuple of (merged_df, metadata_columns, feature_columns, format_type, is_clr)
     """
     # Detect format
     format_type = detect_table_format(df_clr, filename=clr_filename)
+
+    # Detect if data is CLR-transformed
+    is_clr = is_clr_transformed(df_clr, format_type, filename=clr_filename)
 
     # Auto-detect sample column in CLR data
     clr_sample_col = auto_detect_sample_column(df_clr.columns)
@@ -183,5 +251,5 @@ def merge_data(
         # For wide format, feature_cols are all numeric columns except Sample
         feature_cols = [col for col in df_clr.columns if col != "Sample"]
 
-    return df_merged, metadata_cols, feature_cols, format_type
+    return df_merged, metadata_cols, feature_cols, format_type, is_clr
 
