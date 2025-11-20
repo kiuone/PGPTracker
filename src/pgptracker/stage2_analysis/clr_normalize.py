@@ -57,7 +57,7 @@ def apply_clr(
     
     if input_format in ('long', 'stratified'):
         # --- Case 1: Long Input ---
-        raw_long_path = output_dir / f"raw_long_{base_name}"
+        raw_long_path = output_dir / f"raw_long_{base_name}.tsv"
         shutil.copyfile(input_path, raw_long_path)
         output_paths['raw_long'] = raw_long_path
         
@@ -148,7 +148,7 @@ def _process_and_export_N_D(
     output_paths: Dict[str, Path] = {}
     
     # 1. Save raw_wide_N_D
-    raw_wide_N_D_path = output_dir / f"raw_wide_N_D_{base_name}"
+    raw_wide_N_D_path = output_dir / f"raw_wide_N_D_{base_name}.tsv"
     df_wide_N_D.write_csv(raw_wide_N_D_path, separator="\t")
     output_paths['raw_wide_N_D'] = raw_wide_N_D_path
     
@@ -156,7 +156,7 @@ def _process_and_export_N_D(
     df_clr_wide_N_D = _clr_wide_N_D(df_wide_N_D)
     
     # 3. Save clr_wide_N_D
-    clr_wide_N_D_path = output_dir / f"clr_wide_N_D_{base_name}"
+    clr_wide_N_D_path = output_dir / f"clr_wide_N_D_{base_name}.tsv"
     df_clr_wide_N_D.write_csv(clr_wide_N_D_path, separator="\t")
     output_paths['clr_wide_N_D'] = clr_wide_N_D_path
     
@@ -164,7 +164,7 @@ def _process_and_export_N_D(
     if keep_feature_cols_separate:
         df_clr_split_D_N = _create_D_N_split_table(df_clr_wide_N_D)
         
-        clr_split_path = output_dir / f"clr_wide_D_N_split_{base_name}"
+        clr_split_path = output_dir / f"clr_wide_D_N_split_{base_name}.tsv"
         df_clr_split_D_N.write_csv(clr_split_path, separator="\t")
         output_paths['clr_wide_D_N_split'] = clr_split_path
         
@@ -174,7 +174,7 @@ def _process_and_export_N_D(
     if export_sparcc_format:
         df_wide_D_N = _transpose_N_D_to_D_N(df_wide_N_D)
         
-        raw_wide_D_N_path = output_dir / f"raw_wide_D_N_{base_name}"
+        raw_wide_D_N_path = output_dir / f"raw_wide_D_N_{base_name}.tsv"
         df_wide_D_N.write_csv(raw_wide_D_N_path, separator="\t")
         output_paths['raw_wide_D_N'] = raw_wide_D_N_path
         

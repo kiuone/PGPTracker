@@ -167,11 +167,10 @@ def create_parser() -> argparse.ArgumentParser:
     subcommands.register_merge_command(subparsers)
     subcommands.register_stratify_pgpt_command(subparsers)
     subcommands.register_unstratify_pgpt_command(subparsers)
-    # STAGE 2 SUBCOMMANDS
+    # STAGE 2 SUBCOMMANDS 
     subcommands.register_clr_command(subparsers)
     subcommands.register_analysis_command(subparsers)
-    subcommands.register_gui_command(subparsers)
-
+    
     return parser
 
 def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
@@ -335,9 +334,9 @@ def main() -> int:
         return run_interactive_mode()
     
     args = parser.parse_args()
-
+    profile_name = getattr(args, 'profile', None)
     # Check if the --profile flag was used
-    if getattr(args, 'profile', None):  
+    if profile_name:
         print(f"[INFO] Enabling profiler with preset: {args.profile}")
         use_preset(args.profile)
         MemoryProfiler.enable()
@@ -350,7 +349,7 @@ def main() -> int:
         exit_code = args.func(args)
         
         # This code only runs if args.func() completes successfully.
-        if getattr(args, 'profile', None) and MemoryProfiler.is_enabled(): 
+        if profile_name and MemoryProfiler.is_enabled():
             MemoryProfiler.disable()
             
             config = get_config()
