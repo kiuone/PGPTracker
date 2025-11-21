@@ -221,9 +221,9 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     params_group.add_argument(
         "--chunk-size",
         type=int,
-        default=1000,
+        default=0,
         metavar="INT",
-        help="Gene families per chunk for hsp.py (default: 1000)"
+        help="KO columns per batch: 0=auto-detect, -1=no chunking, >0=manual (default: 0)"
     )
     
     params_group.add_argument(

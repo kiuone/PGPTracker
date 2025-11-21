@@ -87,10 +87,8 @@ def run_pipeline(args: argparse.Namespace) -> int:
         print(f"\n[PHYLO ERROR] Phylogenetic tree build failed: {e}", file=sys.stderr)
         return 1
     
-    # Predict gene content (Castor HSP with Hybrid Batching)
+    # Predict gene content (Castor HSP)
     print("\nStep 4/9: Predicting gene content...")
-    print("  -> Running Castor HSP for marker genes (16S + NSTI)")
-    print(f"  -> Running Castor HSP for KO predictions (Hybrid Batching, chunk_size={args.chunk_size})")
     try:
         predicted_paths = predict_functional_profiles(
             tree_path=phylo_tree_path,
