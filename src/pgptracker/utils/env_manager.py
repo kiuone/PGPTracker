@@ -26,10 +26,19 @@ def detect_available_cores() -> int:
 
 def detect_available_memory() -> float:
     """
-    Detects available system memory in GB (cross-platform).
+    Detects total system memory in GB (cross-platform).
     """
     mem = psutil.virtual_memory()
-    return round(mem.total / (1024 * 1024 * 1024), 2)
+    return round(mem.total / (1024 ** 3), 2)
+
+
+def detect_free_memory() -> float:
+    """
+    Detects currently available (free) memory in GB.
+    Use this for runtime RAM optimization decisions.
+    """
+    mem = psutil.virtual_memory()
+    return round(mem.available / (1024 ** 3), 2)
 
 
 def check_conda_available() -> bool:

@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, Optional
 
 import polars as pl
+from pgptracker.utils.env_manager import detect_free_memory
 
 
 def _get_r_script(script_name: str) -> Path:
@@ -23,24 +24,6 @@ def _get_r_script(script_name: str) -> Path:
     except AttributeError:
         with resources.path("pgptracker.resources.r_scripts", script_name) as p:
             return p
-
-
-def _detect_available_ram() -> float:
-    """
-    Detect available system RAM in GB.
-
-    Returns:
-        Available RAM in GB (fallback: 8.0 if detection fails)
-    """
-    try:
-        with open('/proc/meminfo', 'r') as f:
-            for line in f:
-                if line.startswith('MemAvailable:'):
-                    kb = int(line.split()[1])
-                    return kb / (1024 ** 2)
-    except:
-        pass
-    return 8.0
 
 
 def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[float] = None) -> dict:
@@ -55,12 +38,12 @@ def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[f
         dict: {chunk_size, num_batches, strategy, message}
     """
     if available_ram_gb is None:
-        available_ram_gb = _detect_available_ram()
+        available_ram_gb = detect_free_memory()
 
     ko_lazy = pl.scan_csv(ko_db_path, separator="\t")
     num_columns = len(ko_lazy.collect_schema().names()) - 1
 
-    # Rough estimate: 5MB per column for ~10k genomes
+    # Estimate: 5MB per column for ~10k genomes
     full_table_size_gb = (num_columns * 5) / 1024
     usable_ram_gb = available_ram_gb * 0.5
 
@@ -104,51 +87,24 @@ def predict_functional_profiles(
 
     Returns:
         Dictionary: {'marker': marker_path, 'ko': ko_path}
-
-    Raises:
-        FileNotFoundError: If inputs don't exist
-        RuntimeError: If R scripts fail
     """
-    if not tree_path.exists():
-        raise FileNotFoundError(f"Tree file not found: {tree_path}")
-    if not ref_dir.exists():
-        raise FileNotFoundError(f"Reference directory not found: {ref_dir}")
-
     marker_db = ref_dir / "16S.txt.gz"
     ko_db = ref_dir / "ko.txt.gz"
-
-    for db_file in [marker_db, ko_db]:
-        if not db_file.exists():
-            raise FileNotFoundError(f"Reference database missing: {db_file}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Predicting marker genes (16S) and NSTI...")
-    marker_path = _predict_marker_16s(
-        tree=tree_path,
-        db_path=marker_db,
-        output_dir=output_dir,
-        ref_dir=ref_dir
-    )
+    marker_path = _predict_marker_16s(tree_path, marker_db, output_dir)
 
     print("Predicting KO abundances...")
     ko_path = _predict_ko_adaptive(
-        tree=tree_path,
-        db_path=ko_db,
-        output_path=output_dir / "KO_predicted.tsv.gz",
-        chunk_size=chunk_size,
-        threads=threads
+        tree_path, ko_db, output_dir / "KO_predicted.tsv.gz", chunk_size, threads
     )
 
     return {'marker': marker_path, 'ko': ko_path}
 
 
-def _predict_marker_16s(
-    tree: Path,
-    db_path: Path,
-    output_dir: Path,
-    ref_dir: Path
-) -> Path:
+def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
     """Predict 16S copy numbers and calculate NSTI."""
     hsp_script = _get_r_script("hsp.R")
     nsti_script = _get_r_script("nsti.R")
@@ -163,13 +119,13 @@ def _predict_marker_16s(
         marker_df.write_csv(trait_file, separator="\t")
 
         hsp_output = temp_dir / "16S_predicted.tsv"
-        _run_r_hsp(hsp_script, tree, trait_file, hsp_output, method="mp")
+        _run_r_script(hsp_script, [str(tree), str(trait_file), str(hsp_output), "mp"])
 
         known_tips_file = temp_dir / "known_tips.txt"
         marker_df.select(genome_col).write_csv(known_tips_file, has_header=False)
 
         nsti_output = temp_dir / "nsti.tsv"
-        _run_r_nsti(nsti_script, tree, known_tips_file, nsti_output)
+        _run_r_script(nsti_script, [str(tree), str(known_tips_file), str(nsti_output)])
 
         pred_16s = pl.read_csv(hsp_output, separator="\t")
         nsti_df = pl.read_csv(nsti_output, separator="\t")
@@ -188,16 +144,7 @@ def _predict_ko_adaptive(
     chunk_size: Optional[int],
     threads: int
 ) -> Path:
-    """
-    Adaptive KO prediction with automatic RAM optimization.
-
-    Args:
-        tree: Phylogenetic tree
-        db_path: KO database path
-        output_path: Output file path
-        chunk_size: 0=auto, -1=force single pass, >0=manual
-        threads: Number of parallel threads
-    """
+    """Adaptive KO prediction with automatic RAM optimization."""
     hsp_script = _get_r_script("hsp.R")
 
     ko_lazy = pl.scan_csv(db_path, separator="\t")
@@ -212,7 +159,7 @@ def _predict_ko_adaptive(
         print(f"  {config['message']}")
     elif chunk_size == -1:
         chunk_size = len(ko_columns)
-        print(f"  Single-pass mode (no chunking)")
+        print("  Single-pass mode (no chunking)")
 
     # Single-pass execution
     if chunk_size >= len(ko_columns):
@@ -224,7 +171,7 @@ def _predict_ko_adaptive(
             ko_table.write_csv(trait_file, separator="\t")
 
             temp_output = temp_dir / "ko_predicted.tsv"
-            _run_r_hsp(hsp_script, tree, trait_file, temp_output, method="mp")
+            _run_r_script(hsp_script, [str(tree), str(trait_file), str(temp_output), "mp"])
 
             result = pl.read_csv(temp_output, separator="\t")
 
@@ -283,57 +230,24 @@ def _process_batch(
     batch_df.write_csv(batch_trait, separator="\t")
 
     batch_output = temp_dir / f"batch_{batch_num}_predicted.tsv"
-    _run_r_hsp(hsp_script, tree, batch_trait, batch_output, method="mp")
+    _run_r_script(hsp_script, [str(tree), str(batch_trait), str(batch_output), "mp"])
 
     result = pl.read_csv(batch_output, separator="\t")
     return result
 
 
-def _run_r_hsp(
-    script_path: Path,
-    tree: Path,
-    trait_file: Path,
-    output_file: Path,
-    method: str = "mp"
-) -> None:
-    """Execute R HSP script."""
-    cmd = [
-        "Rscript",
-        str(script_path),
-        str(tree),
-        str(trait_file),
-        str(output_file),
-        method
-    ]
+def _run_r_script(script_path: Path, args: list) -> None:
+    """
+    Execute R script with arguments.
 
+    Raises RuntimeError with stderr context if script fails.
+    """
+    cmd = ["Rscript", str(script_path)] + args
     result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"R HSP failed with exit code {result.returncode}\n"
-            f"STDERR: {result.stderr}"
-        )
-
-
-def _run_r_nsti(
-    script_path: Path,
-    tree: Path,
-    known_tips_file: Path,
-    output_file: Path
-) -> None:
-    """Execute R NSTI script."""
-    cmd = [
-        "Rscript",
-        str(script_path),
-        str(tree),
-        str(known_tips_file),
-        str(output_file)
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"R NSTI failed with exit code {result.returncode}\n"
+            f"R script failed: {script_path.name}\n"
+            f"Exit code: {result.returncode}\n"
             f"STDERR: {result.stderr}"
         )

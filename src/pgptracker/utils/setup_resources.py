@@ -7,7 +7,6 @@ Downloads reference databases and validates external dependencies.
 import shutil
 import tarfile
 from pathlib import Path
-from urllib.request import urlopen
 
 import requests
 from tqdm import tqdm
