@@ -16,7 +16,12 @@ from pgptracker.utils.env_manager import detect_free_memory
 
 
 def _get_r_script(script_name: str) -> Path:
-    """Get path to R script in package resources."""
+    """
+    Locate R script in installed package resources.
+
+    Uses importlib.resources to find scripts bundled in pgptracker.resources.r_scripts/
+    regardless of installation method (pip, conda, editable install).
+    """
     from importlib import resources
     try:
         r_scripts = resources.files("pgptracker.resources.r_scripts")
@@ -28,14 +33,20 @@ def _get_r_script(script_name: str) -> Path:
 
 def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[float] = None) -> dict:
     """
-    Calculate optimal chunk size based on available RAM.
+    Determine whether to process KO table in single pass or batches based on RAM.
 
-    Args:
-        ko_db_path: Path to KO database
-        available_ram_gb: Override RAM detection (None = auto-detect)
+    Logic:
+    1. Estimates KO table size: ~5MB per column × 10,000 columns = ~50GB
+    2. Compares against 50% of available RAM (safety margin)
+    3. If sufficient RAM: returns full column count (single-pass)
+    4. If insufficient RAM: calculates batch size that fits in memory
 
-    Returns:
-        dict: {chunk_size, num_batches, strategy, message}
+    Example:
+        System with 16GB RAM, KO table needs 50GB:
+        → usable_ram = 8GB → chunk_size ≈ 1600 columns → 7 batches
+
+        System with 64GB RAM, KO table needs 50GB:
+        → usable_ram = 32GB → chunk_size = 10,000 (all columns) → 1 batch
     """
     if available_ram_gb is None:
         available_ram_gb = detect_free_memory()
@@ -43,7 +54,6 @@ def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[f
     ko_lazy = pl.scan_csv(ko_db_path, separator="\t")
     num_columns = len(ko_lazy.collect_schema().names()) - 1
 
-    # Estimate: 5MB per column for ~10k genomes
     full_table_size_gb = (num_columns * 5) / 1024
     usable_ram_gb = available_ram_gb * 0.5
 
@@ -76,17 +86,27 @@ def predict_functional_profiles(
     chunk_size: Optional[int] = 0
 ) -> Dict[str, Path]:
     """
-    Predict functional profiles using Hidden State Prediction.
+    Predict gene copy numbers using Hidden State Prediction (Castor/R implementation).
+
+    Uses phylogenetic tree (from SEPP placement) to infer gene content in unknown ASVs
+    by analyzing patterns in reference genomes. Two predictions made:
+
+    1. Marker genes (16S rRNA copy number + NSTI quality metric)
+       - Single column, processed in one batch
+       - NSTI = phylogenetic distance to nearest reference genome
+
+    2. KO genes (10,000+ KEGG Ortholog functional genes)
+       - Processed adaptively: single-pass if RAM sufficient, batched if constrained
+       - Each batch calls R/Castor independently, results merged horizontally
+
+    Input tree comes from: pipeline_st1.py → place_sequences() → SEPP algorithm
+    Reference data from: ~/.pgptracker/db/prokaryotic/ (downloaded by setup command)
 
     Args:
-        tree_path: Path to phylogenetic tree (.tre)
-        output_dir: Directory for output files
-        ref_dir: Path to prokaryotic reference database
-        threads: Number of threads for parallel processing
-        chunk_size: KO columns per batch (0=auto, -1=no chunking, >0=manual)
+        chunk_size: 0=auto-detect, -1=force single-pass, >0=manual batch size
 
     Returns:
-        Dictionary: {'marker': marker_path, 'ko': ko_path}
+        {'marker': marker_nsti_predicted.tsv.gz, 'ko': KO_predicted.tsv.gz}
     """
     marker_db = ref_dir / "16S.txt.gz"
     ko_db = ref_dir / "ko.txt.gz"
@@ -105,7 +125,21 @@ def predict_functional_profiles(
 
 
 def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
-    """Predict 16S copy numbers and calculate NSTI."""
+    """
+    Predict 16S rRNA copy numbers and calculate phylogenetic quality metric (NSTI).
+
+    Workflow:
+    1. Load 16S reference table (genome_id → copy_count)
+    2. Call hsp.R: uses Castor max parsimony to predict copy counts for unknown tips
+    3. Call nsti.R: calculates phylogenetic distance to nearest reference genome
+    4. Join predictions with NSTI values
+
+    NSTI (Nearest Sequenced Taxon Index): Lower = better prediction quality
+    - NSTI < 0.06: High confidence (close reference exists)
+    - NSTI > 2.0: Low confidence (distant from all references)
+
+    Output: marker_nsti_predicted.tsv.gz (columns: sequence, 16S, metadata_NSTI)
+    """
     hsp_script = _get_r_script("hsp.R")
     nsti_script = _get_r_script("nsti.R")
 
@@ -144,7 +178,25 @@ def _predict_ko_adaptive(
     chunk_size: Optional[int],
     threads: int
 ) -> Path:
-    """Adaptive KO prediction with automatic RAM optimization."""
+    """
+    Predict KO gene copy numbers with RAM-aware batching strategy.
+
+    Challenge: KO reference table contains 10,000+ columns (genes) × 20,000+ rows (genomes)
+    Loading entire table = ~50GB RAM. Solution: process columns in batches.
+
+    Single-pass mode (chunk_size >= total columns):
+    - Loads all KO columns at once using Polars streaming engine
+    - Single R/Castor call processes entire table
+    - Fastest (no merging overhead)
+
+    Batched mode (chunk_size < total columns):
+    - Splits columns into N batches (e.g., 2000 columns each)
+    - Each batch: load → R/Castor → save result
+    - Parallel processing if threads > 1 (ProcessPoolExecutor)
+    - Merges batches horizontally (concatenate columns)
+
+    Output: KO_predicted.tsv.gz (ASV_ID → 10,000+ KO gene predictions)
+    """
     hsp_script = _get_r_script("hsp.R")
 
     ko_lazy = pl.scan_csv(db_path, separator="\t")
@@ -152,7 +204,6 @@ def _predict_ko_adaptive(
     genome_col = all_columns[0]
     ko_columns = all_columns[1:]
 
-    # Determine chunk size
     if chunk_size == 0 or chunk_size is None:
         config = _calculate_optimal_chunk_size(db_path)
         chunk_size = config['chunk_size']
@@ -161,7 +212,6 @@ def _predict_ko_adaptive(
         chunk_size = len(ko_columns)
         print("  Single-pass mode (no chunking)")
 
-    # Single-pass execution
     if chunk_size >= len(ko_columns):
         ko_table = pl.scan_csv(db_path, separator="\t").collect(engine='streaming')
 
@@ -178,7 +228,6 @@ def _predict_ko_adaptive(
         result.write_csv(output_path, separator="\t")
         return output_path
 
-    # Batched execution
     num_batches = (len(ko_columns) + chunk_size - 1) // chunk_size
     print(f"  Processing {len(ko_columns)} columns in {num_batches} batches")
 
@@ -202,7 +251,6 @@ def _predict_ko_adaptive(
                 del result
                 gc.collect()
 
-    # Merge batches
     final_result = batch_results[0]
     for batch in batch_results[1:]:
         batch = batch.drop("sequence")
@@ -221,7 +269,12 @@ def _process_batch(
     hsp_script: Path,
     temp_dir: Path
 ) -> pl.DataFrame:
-    """Process single batch of KO columns."""
+    """
+    Execute single KO batch: select columns → write temp file → call R → return result.
+
+    Uses Polars streaming engine to load only specified columns (memory optimization).
+    Temp files needed because R scripts expect file paths, not stdin pipes.
+    """
     batch_df = (pl.scan_csv(db_path, separator="\t")
                 .select([genome_col] + batch_cols)
                 .collect(engine='streaming'))
@@ -238,9 +291,12 @@ def _process_batch(
 
 def _run_r_script(script_path: Path, args: list) -> None:
     """
-    Execute R script with arguments.
+    Execute R script via subprocess (Rscript binary must be in PATH).
 
-    Raises RuntimeError with stderr context if script fails.
+    Why shell out to R instead of using Python:
+    - Castor library (phylogenetic algorithms) only available in R
+    - R implementation is reference standard for Hidden State Prediction
+    - Avoids reimplementing complex ancestral state reconstruction algorithms
     """
     cmd = ["Rscript", str(script_path)] + args
     result = subprocess.run(cmd, capture_output=True, text=True)

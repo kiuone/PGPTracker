@@ -16,16 +16,27 @@ def place_sequences(
     threads: int = 1
 ) -> Path:
     """
-    Place sequences into reference phylogeny using SEPP.
+    Insert unknown ASV sequences into reference phylogeny using SEPP algorithm.
 
-    Args:
-        seqs_path: Path to representative sequences (.fna/.fasta)
-        output_dir: Directory for output files
-        ref_dir: Path to prokaryotic reference database
-        threads: Number of parallel processes
+    Workflow:
+    1. SEPP aligns ASVs to reference alignment and places them in reference tree
+    2. GAPPA converts placement JSON to standard Newick tree format
+
+    Why phylogenetic placement needed:
+    - Unknown ASVs (user's sequences) need evolutionary context
+    - Tree topology determines which reference genomes are "nearby"
+    - Proximity in tree = similar gene content (basis for HSP predictions)
+
+    SEPP algorithm:
+    - Ensemble-based maximum likelihood placement
+    - Fragments query sequence and finds best insertion point in tree
+    - More accurate than de novo tree building for large reference trees
+
+    Input sequences from: pipeline_st1.py → export_qza_files() → rep_seqs.fna
+    Reference tree: ~/.pgptracker/db/prokaryotic/pro_ref.tre (~20k genomes)
 
     Returns:
-        Path to final Newick tree file
+        Path to placed_seqs.tre (Newick format with ASVs inserted)
     """
     ref_tree = ref_dir / "pro_ref.tre"
     ref_aln = ref_dir / "pro_ref.fna"
@@ -50,7 +61,12 @@ def _run_sepp(
     output_dir: Path,
     threads: int
 ) -> Path:
-    """Execute SEPP via run_sepp.py subprocess."""
+    """
+    Execute SEPP algorithm via run_sepp.py (must be in PATH from conda env).
+
+    Output: placement.jplace (JSON format with placement probabilities per edge)
+    Temp directory prevents SEPP from cluttering system /tmp with alignment fragments.
+    """
     with tempfile.TemporaryDirectory(prefix="sepp_") as temp_dir:
         jplace_file = output_dir / "placement.jplace"
 
@@ -76,7 +92,12 @@ def _run_sepp(
 
 
 def _run_gappa(jplace_file: Path, output_tree: Path) -> None:
-    """Convert .jplace to Newick tree using GAPPA."""
+    """
+    Convert SEPP's JSON placement format to Newick tree using GAPPA.
+
+    GAPPA grafts placed sequences onto reference tree at their insertion points.
+    Output used by R/Castor for Hidden State Prediction (needs Newick format).
+    """
     cmd = [
         "gappa", "examine", "graft",
         "--jplace-path", str(jplace_file),
