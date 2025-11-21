@@ -155,7 +155,6 @@ dependencies:
   - pandas=2.3.1=py39h1b6b32d_0
   - pango=1.56.4=hadf4263_0
   - pcre2=10.46=h1321c63_0
-  - picrust2=2.6.2=pyhdfd78af_1
   - pip=25.2=pyh8b19718_0
   - pixman=0.46.4=h54a6638_1
   - pluggy=1.6.0=pyhd8ed1ab_0
@@ -174,6 +173,7 @@ dependencies:
   - pytz=2025.2=pyhd8ed1ab_0
   - qt-main=5.15.15=h3a7ef08_5
   - r-base=4.5.2=h14df4e6_0
+  - r-ape=5.8.1=r45h549e7c5_1
   - r-castor=1.8.4=r45h3697838_1
   - r-jsonlite=2.0.0=r45h54b55ab_1
   - r-lattice=0.22_7=r45h54b55ab_1
