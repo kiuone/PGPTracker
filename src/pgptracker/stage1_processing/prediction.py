@@ -146,7 +146,7 @@ def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
     hsp_script = _get_r_script("hsp.R")
     nsti_script = _get_r_script("nsti.R")
 
-    marker_df = pl.read_csv(db_path, separator="\t")
+    marker_df = pl.read_csv(db_path, separator="\t", infer_schema_length=0)
     genome_col = marker_df.columns[0]
 
     with tempfile.TemporaryDirectory(prefix="marker_") as temp_dir:

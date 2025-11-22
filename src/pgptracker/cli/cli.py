@@ -350,23 +350,28 @@ def main() -> int:
         # This code only runs if args.func() completes successfully.
         if profile_name and MemoryProfiler.is_enabled():
             MemoryProfiler.disable()
-            
-            config = get_config()
-            
-            # 1. Generate TSV
-            # Determine output dir: use subcommand's dir, or default
-            output_dir = Path("results") # Default
-            if hasattr(args, 'output') and args.output:
-                output_dir = Path(args.output)
-            
-            output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = output_dir / f"pgptracker_profile_{args.profile}_{datetime.now():%Y%m%d_%H%M%S}.tsv"
 
-            generate_tsv_report(report_path)
+            # Check if any profiling data was collected
+            if len(MemoryProfiler.get_profiles()) > 0:
+                config = get_config()
 
-            # 2. Print Pretty Table
-            if config.show_pretty_table:
-                print_pretty_table()
+                # 1. Generate TSV
+                # Determine output dir: use subcommand's dir, or default
+                output_dir = Path("results") # Default
+                if hasattr(args, 'output') and args.output:
+                    output_dir = Path(args.output)
+
+                output_dir.mkdir(parents=True, exist_ok=True)
+                report_path = output_dir / f"pgptracker_profile_{args.profile}_{datetime.now():%Y%m%d_%H%M%S}.tsv"
+
+                generate_tsv_report(report_path)
+
+                # 2. Print Pretty Table
+                if config.show_pretty_table:
+                    print_pretty_table()
+            else:
+                print("[WARNING] Profiler was enabled but no data was collected. "
+                      "Check that profiled functions were executed and module filters are correct.")
         
         return exit_code
     

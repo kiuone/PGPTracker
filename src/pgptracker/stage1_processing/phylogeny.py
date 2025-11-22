@@ -95,6 +95,10 @@ def _run_sepp(
     with tempfile.TemporaryDirectory(prefix="sepp_") as temp_dir:
         output_prefix = "placement"
 
+        # Clean old SEPP output files to avoid overwrite errors
+        for old_file in output_dir.glob(f"{output_prefix}_*"):
+            old_file.unlink()
+
         cmd = [
             "run_sepp.py",
             "-t", str(ref_tree),
