@@ -36,24 +36,54 @@ from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 def setup_command(args: argparse.Namespace) -> int:
     """
     Executes the Conda environment creation or update.
-    Ensures all environments match the required .yml files.
+    Optionally downloads reference databases.
     """
     print("PGPTracker - Environment Setup")
-    
+
+    all_success = True
+
+    # Download reference databases if requested
+    if args.download_db:
+        print("\n=== Downloading Reference Databases ===")
+        from pgptracker.utils.setup_resources import download_database, check_dependencies
+
+        db_dir = Path.home() / ".pgptracker" / "db"
+
+        try:
+            print("Checking external dependencies (SEPP, GAPPA, Rscript)...")
+            check_dependencies()
+            print("  -> All dependencies found in PATH")
+
+            print(f"\nDownloading PICRUSt2 reference database to {db_dir}")
+            print("This will download ~10GB and may take 10-30 minutes...")
+
+            download_database(output_dir=db_dir, force=args.force)
+            print("\n[SUCCESS] Reference database downloaded successfully!")
+
+        except RuntimeError as e:
+            print(f"\n[ERROR] Database download failed: {e}", file=sys.stderr)
+            all_success = False
+
+        # If only downloading databases, skip environment setup
+        if args.db_only:
+            return 0 if all_success else 1
+
+    # Create/update conda environments
+    print("\n=== Setting Up Conda Environments ===")
+
     # 1. Get the path to the packaged .yml files
     try:
         env_files_path = importlib.resources.files("pgptracker") / "environments"
     except Exception as e:
         print(f"Critical Error: Could not find the 'environments' folder. {e}")
         return 1
-    
+
     # 2. Map environment names to their .yml files
     env_to_file_map = {
         ENV_MAP["qiime"]: "qiime2-amplicon-2025.10.yml",
         ENV_MAP["PGPTracker"]: "pgptracker.yml",
     }
 
-    all_success = True
     if args.force:
         print("Checking and syncing environments (--force enabled)...")
     else:
@@ -67,13 +97,13 @@ def setup_command(args: argparse.Namespace) -> int:
             print(f"\n[ERROR] Environment file not found: {yml_path}")
             print(f"       Cannot create or update environment '{env_name}'.")
             all_success = False
-            continue 
+            continue
 
         cmd = []
         action_text = ""
 
         env_exists = check_environment_exists(env_name)
-        
+
         if env_exists and not args.force:
             print(f"[INFO] Environment '{env_name}' already exists. Skipping.")
             continue
@@ -87,7 +117,7 @@ def setup_command(args: argparse.Namespace) -> int:
             with importlib.resources.as_file(yml_path) as yml_real_path:
                 cmd = ["conda", "env", "create", "--name", env_name, "-f", str(yml_path)]
             action_text = "created"
-            
+
         print("       This may take several minutes...")
 
         try:
@@ -100,12 +130,15 @@ def setup_command(args: argparse.Namespace) -> int:
             print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?", file=sys.stderr)
             all_success = False
             break
-            
+
     if all_success:
-        print("Setup completed successfully!")
+        print("\nSetup completed successfully!")
+        if not args.download_db:
+            print("\nNext step: Download reference databases with:")
+            print("  pgptracker setup --download-db")
         return 0
     else:
-        print("Setup failed for one or more environments.", file=sys.stderr)
+        print("Setup failed for one or more components.", file=sys.stderr)
         return 1
 
 
@@ -147,15 +180,27 @@ def create_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Set up the required Conda environments (qiime2-amplicon-2025.10, pgptracker)"
+        help="Set up Conda environments and/or download reference databases"
     )
 
     setup_parser.add_argument(
         "-f", "--force",
         action="store_true",
-        help="Force update of existing environments to match .yml files"
-        )
-    
+        help="Force update of existing environments/databases"
+    )
+
+    setup_parser.add_argument(
+        "--download-db",
+        action="store_true",
+        help="Download PICRUSt2 reference database (~10GB) to ~/.pgptracker/db/"
+    )
+
+    setup_parser.add_argument(
+        "--db-only",
+        action="store_true",
+        help="Only download databases, skip environment setup (must be used with --download-db)"
+    )
+
     setup_parser.set_defaults(func=setup_command)
     
     subcommands.register_export_command(subparsers)
