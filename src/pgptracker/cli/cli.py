@@ -111,7 +111,7 @@ def setup_command(args: argparse.Namespace) -> int:
 
 def gui_command(args: argparse.Namespace) -> int:
     """
-    Launch the PGPTracker Stage 2 Data Explorer GUI.
+    Launch the PGPTracker Stage 2 Data Explorer GUI (Streamlit).
 
     Args:
         args: Parsed command-line arguments
@@ -119,37 +119,12 @@ def gui_command(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, non-zero for failure)
     """
-    import logging
-
-    # Configure logging
-    level = logging.INFO if args.verbose else logging.WARNING
-    logging.basicConfig(
-        level=level,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-
-    # Suppress overly verbose Dash logs unless in verbose mode
-    if not args.verbose:
-        logging.getLogger('dash').setLevel(logging.WARNING)
-        logging.getLogger('werkzeug').setLevel(logging.WARNING)
-
-    if args.verbose:
-        print("=" * 60)
-        print("PGPTracker Stage 2 Data Explorer")
-        print("=" * 60)
-        print(f"Starting server on http://0.0.0.0:{args.port}")
-        print(f"Debug mode: {not args.no_debug}")
-        print(f"Verbose logging: enabled")
-        print("Press Ctrl+C to stop the server")
-        print("=" * 60)
-
     try:
         from pgptracker.gui import run_app
-        run_app(debug=not args.no_debug, port=args.port)
+        results_dir = args.results_dir if hasattr(args, 'results_dir') and args.results_dir else None
+        run_app(results_dir=results_dir, port=args.port)
         return 0
     except KeyboardInterrupt:
-        print("\nServer stopped by user")
         return 0
     except Exception as e:
         print(f"ERROR: Failed to start GUI: {e}", file=sys.stderr)
@@ -226,19 +201,16 @@ def create_parser() -> argparse.ArgumentParser:
     gui_parser.add_argument(
         "--port",
         type=int,
-        default=8050,
+        default=8501,
         metavar="INT",
-        help="Port number for the server (default: 8050)"
+        help="Port number for the Streamlit server (default: 8501)"
     )
     gui_parser.add_argument(
-        "--no-debug",
-        action="store_true",
-        help="Disable debug mode"
-    )
-    gui_parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Enable verbose logging"
+        "--results-dir",
+        type=str,
+        metavar="PATH",
+        default=None,
+        help="Path to results directory for auto-loading data"
     )
     gui_parser.set_defaults(func=gui_command)
 
