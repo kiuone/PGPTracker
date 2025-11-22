@@ -248,8 +248,9 @@ class TestRunGappa:
         mock_result = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
         def create_newick(*args, **kwargs):
-            # GAPPA creates .newick file
-            newick_file = tmp_path / "placed_seqs.newick"
+            # GAPPA creates {file_prefix}{jplace_basename}.newick
+            # placed_seqs + placement.json → placed_seqsplacement.newick
+            newick_file = tmp_path / "placed_seqsplacement.newick"
             newick_file.write_text("(seq1:0.5);")
             return mock_result
 
@@ -258,7 +259,7 @@ class TestRunGappa:
 
             # Verify file was renamed to .tre
             assert output_tree.exists()
-            assert not (tmp_path / "placed_seqs.newick").exists()
+            assert not (tmp_path / "placed_seqsplacement.newick").exists()
 
             mock_run.assert_called_once()
             cmd = mock_run.call_args[0][0]
@@ -297,7 +298,16 @@ class TestRunGappa:
 
         mock_result = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
+        def create_newick(*args, **kwargs):
+            # Create output directory and newick file
+            output_tree.parent.mkdir(parents=True, exist_ok=True)
+            # GAPPA creates {file_prefix}{jplace_basename}.newick
+            # tree + placement.json → treeplacement.newick
+            newick_file = output_tree.parent / f"{output_tree.stem}{jplace_file.stem}.newick"
+            newick_file.write_text("(seq1:0.5);")
+            return mock_result
+
+        with patch('subprocess.run', side_effect=create_newick) as mock_run:
             _run_gappa(jplace_file, output_tree)
 
             cmd = mock_run.call_args[0][0]

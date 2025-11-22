@@ -156,8 +156,9 @@ def _run_gappa(jplace_file: Path, output_tree: Path) -> None:
             f"STDERR: {result.stderr}"
         )
 
-    # GAPPA creates {prefix}.newick, rename to expected .tre extension
-    gappa_output = output_tree.parent / f"{output_tree.stem}.newick"
+    # GAPPA creates {file_prefix}{jplace_basename}.newick
+    # Example: placed_seqs + placement_placement.json → placed_seqsplacement_placement.newick
+    gappa_output = output_tree.parent / f"{output_tree.stem}{jplace_file.stem}.newick"
     if not gappa_output.exists():
         raise FileNotFoundError(
             f"GAPPA finished but did not create {gappa_output}\n"
