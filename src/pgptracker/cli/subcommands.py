@@ -15,8 +15,8 @@ import polars as pl
 # Local imports
 from pgptracker.utils.validator import ValidationError
 from pgptracker.wrappers.qiime.export_module import export_qza_files
-from pgptracker.wrappers.picrust.phylogeny import place_sequences
-from pgptracker.wrappers.picrust.prediction import predict_functional_profiles
+from pgptracker.stage1_processing.phylogeny import place_sequences
+from pgptracker.stage1_processing.prediction import predict_functional_profiles
 from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
 from pgptracker.wrappers.qiime.classify import classify_taxonomy
 from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table

@@ -77,7 +77,7 @@ def _run_sepp(
         cmd = [
             "run_sepp.py",
             "-t", str(ref_tree),
-            "-r", str(ref_aln),
+            "-a", str(ref_aln),
             "-f", str(seqs),
             "-o", str(jplace_file.stem),
             "-d", temp_dir,

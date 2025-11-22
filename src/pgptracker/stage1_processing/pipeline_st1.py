@@ -17,8 +17,8 @@ from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.wrappers.qiime.export_module import export_qza_files
 from pgptracker.utils.env_manager import (detect_available_cores, detect_available_memory,
     get_output_dir, get_threads, get_database_dir)
-from pgptracker.wrappers.picrust.phylogeny import place_sequences
-from pgptracker.wrappers.picrust.prediction import predict_functional_profiles
+from pgptracker.stage1_processing.phylogeny import place_sequences
+from pgptracker.stage1_processing.prediction import predict_functional_profiles
 from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
 from pgptracker.wrappers.qiime.classify import classify_taxonomy
 from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table

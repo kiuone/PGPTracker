@@ -25,10 +25,10 @@ def _get_r_script(script_name: str) -> Path:
     from importlib import resources
     try:
         r_scripts = resources.files("pgptracker.resources.r_scripts")
-        return r_scripts / script_name
+        return Path(str(r_scripts / script_name))
     except AttributeError:
         with resources.path("pgptracker.resources.r_scripts", script_name) as p:
-            return p
+            return Path(p)
 
 
 def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[float] = None) -> dict:
@@ -156,7 +156,7 @@ def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
         _run_r_script(hsp_script, [str(tree), str(trait_file), str(hsp_output), "mp"])
 
         known_tips_file = temp_dir / "known_tips.txt"
-        marker_df.select(genome_col).write_csv(known_tips_file, has_header=False)
+        marker_df.select(genome_col).write_csv(known_tips_file, include_header=False)
 
         nsti_output = temp_dir / "nsti.tsv"
         _run_r_script(nsti_script, [str(tree), str(known_tips_file), str(nsti_output)])
@@ -211,6 +211,8 @@ def _predict_ko_adaptive(
     elif chunk_size == -1:
         chunk_size = len(ko_columns)
         print("  Single-pass mode (no chunking)")
+
+    assert chunk_size is not None and chunk_size > 0, "chunk_size must be set to a positive integer"
 
     if chunk_size >= len(ko_columns):
         ko_table = pl.scan_csv(db_path, separator="\t").collect(engine='streaming')
