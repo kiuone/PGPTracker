@@ -13,6 +13,7 @@ from typing import Dict, Optional
 
 import polars as pl
 from pgptracker.utils.env_manager import detect_free_memory
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 
 def _get_r_script(script_name: str) -> Path:
@@ -78,6 +79,7 @@ def _calculate_optimal_chunk_size(ko_db_path: Path, available_ram_gb: Optional[f
         }
 
 
+@profile_memory
 def predict_functional_profiles(
     tree_path: Path,
     output_dir: Path,
@@ -124,6 +126,7 @@ def predict_functional_profiles(
     return {'marker': marker_path, 'ko': ko_path}
 
 
+@profile_memory
 def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
     """
     Predict 16S rRNA copy numbers and calculate phylogenetic quality metric (NSTI).
@@ -171,6 +174,7 @@ def _predict_marker_16s(tree: Path, db_path: Path, output_dir: Path) -> Path:
     return output_path
 
 
+@profile_memory
 def _predict_ko_adaptive(
     tree: Path,
     db_path: Path,
@@ -262,6 +266,7 @@ def _predict_ko_adaptive(
     return output_path
 
 
+@profile_memory
 def _process_batch(
     batch_num: int,
     batch_cols: list,

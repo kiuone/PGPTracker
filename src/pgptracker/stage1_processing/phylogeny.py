@@ -7,8 +7,10 @@ Replaces PICRUSt2 place_seqs.py with direct SEPP/GAPPA calls.
 import subprocess
 import tempfile
 from pathlib import Path
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 
+@profile_memory
 def place_sequences(
     seqs_path: Path,
     output_dir: Path,
@@ -66,6 +68,7 @@ def place_sequences(
     return output_tree
 
 
+@profile_memory
 def _run_sepp(
     seqs: Path,
     ref_tree: Path,
