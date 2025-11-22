@@ -38,8 +38,12 @@ def place_sequences(
     Returns:
         Path to placed_seqs.tre (Newick format with ASVs inserted)
     """
-    ref_tree = ref_dir / "pro_ref.tre"
-    ref_aln = ref_dir / "pro_ref.fna"
+    seqs_path = seqs_path.resolve() 
+    ref_dir = ref_dir.resolve()
+    output_dir = output_dir.resolve()
+    
+    ref_tree = ref_dir / "pro_ref" / "pro_ref.tre"
+    ref_aln = ref_dir / "pro_ref" / "pro_ref.fna"
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
