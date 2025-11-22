@@ -20,25 +20,31 @@ def place_sequences(
     """
     Insert unknown ASV sequences into reference phylogeny using SEPP algorithm.
 
+    SEPP places query sequences into existing reference tree without rebuilding it.
+    This is faster and more accurate than de novo tree construction for large references.
+
     Workflow:
-    1. SEPP aligns ASVs to reference alignment and places them in reference tree
-    2. GAPPA converts placement JSON to standard Newick tree format
+    1. SEPP: Align ASVs to reference, find best insertion points in tree
+    2. GAPPA: Convert JSON output to standard Newick format
 
-    Why phylogenetic placement needed:
-    - Unknown ASVs (user's sequences) need evolutionary context
-    - Tree topology determines which reference genomes are "nearby"
-    - Proximity in tree = similar gene content (basis for HSP predictions)
+    Why needed: Phylogenetic proximity predicts functional similarity
+    - Close relatives in tree likely have similar gene content
+    - Tree topology used by Castor/R to infer gene copy numbers (HSP algorithm)
 
-    SEPP algorithm:
-    - Ensemble-based maximum likelihood placement
-    - Fragments query sequence and finds best insertion point in tree
-    - More accurate than de novo tree building for large reference trees
-
-    Input sequences from: pipeline_st1.py → export_qza_files() → rep_seqs.fna
-    Reference tree: bundled database (src/pgptracker/databases/prokaryotic/pro_ref/pro_ref.tre) (~20k genomes)
+    Args:
+        seqs_path: FASTA with ASV sequences (e.g., rep_seqs.fna from QIIME2)
+        output_dir: Directory for intermediate files (placement JSON, Newick tree)
+        ref_dir: Path to prokaryotic reference database
+        threads: CPU cores for SEPP parallelization
 
     Returns:
-        Path to placed_seqs.tre (Newick format with ASVs inserted)
+        Path to placed_seqs.tre (Newick tree with ASVs grafted onto reference)
+
+    Example:
+        Input: 150 ASV sequences
+        Reference: ~20,000 prokaryotic genomes
+        Output: Newick tree with 20,150 tips (20k ref + 150 ASVs)
+        Runtime: ~5-7 minutes on 8 cores
     """
     seqs_path = seqs_path.resolve()
     output_dir = output_dir.resolve()
@@ -47,13 +53,6 @@ def place_sequences(
     ref_tree = ref_dir / "pro_ref" / "pro_ref.tre"
     ref_aln = ref_dir / "pro_ref" / "pro_ref.fna"
     ref_info = ref_dir / "pro_ref" / "pro_ref.raxml_info"
-
-    if not ref_aln.exists():
-        raise FileNotFoundError(f"Reference alignment not found at: {ref_aln}")
-    if not ref_tree.exists():
-        raise FileNotFoundError(f"Reference tree not found at: {ref_tree}")
-    if not ref_info.exists():
-        raise FileNotFoundError(f"RAxML info file not found at: {ref_info}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -78,19 +77,26 @@ def _run_sepp(
     threads: int
 ) -> Path:
     """
-    Execute SEPP algorithm via run_sepp.py (must be in PATH from conda env).
+    Execute SEPP algorithm to place query sequences into reference tree.
 
-    SEPP flags:
-    -t: tree file (pro_ref.tre)
-    -a: alignment file (pro_ref.fna)
-    -r: raxml info file (pro_ref.raxml_info)
-    -f: fragment/query sequences
-    -o: output prefix
-    -d: output directory for placement files
-    -x: threads
-    --tempdir: temporary working directory for SEPP internals
+    SEPP (SATe-enabled Phylogenetic Placement) uses divide-and-conquer strategy:
+    1. Fragments query sequences into overlapping chunks
+    2. Each chunk aligned to reference subset
+    3. Maximum likelihood determines best insertion point
+    4. Ensemble method combines results
 
-    Output: placement_placement.json (SEPP appends _placement to the prefix)
+    Args:
+        seqs: Query sequences to place (FASTA format)
+        ref_tree: Reference phylogeny (Newick format, ~20k tips)
+        ref_aln: Multiple sequence alignment of reference genomes
+        ref_info: RAxML parameters file (substitution model, branch lengths)
+        output_dir: Where to write placement JSON
+        threads: Parallel alignment jobs
+
+    Returns:
+        Path to placement_placement.json (jplace format)
+
+    Note: SEPP refuses to overwrite existing files. We clean old outputs first.
     """
     with tempfile.TemporaryDirectory(prefix="sepp_") as temp_dir:
         output_prefix = "placement"
@@ -133,12 +139,22 @@ def _run_sepp(
 
 def _run_gappa(jplace_file: Path, output_tree: Path) -> None:
     """
-    Convert SEPP's JSON placement format to Newick tree using GAPPA.
+    Convert jplace format (SEPP output) to Newick tree using GAPPA.
 
-    GAPPA grafts placed sequences onto reference tree at their insertion points.
-    Output used by R/Castor for Hidden State Prediction (needs Newick format).
+    GAPPA (Genesis Applications for Phylogenetic Placement Analysis) extracts
+    the phylogeny from jplace JSON and grafts query sequences at their ML positions.
 
-    Note: GAPPA creates files with .newick extension, which we rename to .tre
+    Args:
+        jplace_file: Placement result from SEPP (placement_placement.json)
+        output_tree: Desired output path (e.g., placed_seqs.tre)
+
+    Output file naming quirk:
+        GAPPA concatenates: file_prefix + jplace_basename + ".newick"
+        Example: "placed_seqs" + "placement_placement" + ".newick"
+                 → placed_seqsplacement_placement.newick
+        We rename this to output_tree path (.tre extension)
+
+    Why Newick needed: R/Castor HSP algorithm requires standard tree format
     """
     cmd = [
         "gappa", "examine", "graft",

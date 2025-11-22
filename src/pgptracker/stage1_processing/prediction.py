@@ -18,10 +18,18 @@ from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 def _get_r_script(script_name: str) -> Path:
     """
-    Locate R script in installed package resources.
+    Resolve absolute path to bundled R script using importlib.resources.
 
-    Uses importlib.resources to find scripts bundled in pgptracker.resources.r_scripts/
-    regardless of installation method (pip, conda, editable install).
+    R scripts (hsp.R, nsti.R) are packaged with PGPTracker, not installed separately.
+    This function finds them regardless of installation method (pip, conda, editable).
+
+    Args:
+        script_name: Filename (e.g., "hsp.R", "nsti.R")
+
+    Returns:
+        Absolute path to script (e.g., /path/to/site-packages/pgptracker/resources/r_scripts/hsp.R)
+
+    Fallback for Python 3.8: Uses resources.path() (deprecated but still works)
     """
     from importlib import resources
     try:
@@ -268,10 +276,22 @@ def _predict_ko_adaptive(
 
 def _process_batch_wrapper(args):
     """
-    Wrapper for _process_batch to enable pickling with ProcessPoolExecutor.
+    Unpacking wrapper for parallel batch processing via ProcessPoolExecutor.
 
-    Unpacks tuple of arguments and calls _process_batch.
-    This is needed because lambda functions cannot be pickled.
+    Python's multiprocessing uses pickle to serialize functions sent to worker processes.
+    Lambda functions are anonymous (no global name) and cannot be pickled.
+
+    Why this exists:
+        executor.map(lambda x: _process_batch(*x), batches)  # ❌ Fails: Can't pickle lambda
+        executor.map(_process_batch_wrapper, batches)       # ✅ Works: Top-level function
+
+    Args:
+        args: Tuple of (batch_num, batch_cols, db_path, genome_col, tree, hsp_script, temp_dir)
+
+    Returns:
+        pl.DataFrame with predictions for this batch's KO columns
+
+    Reference: https://docs.python.org/3/library/pickle.html#what-can-be-pickled-and-unpickled
     """
     return _process_batch(*args)
 
