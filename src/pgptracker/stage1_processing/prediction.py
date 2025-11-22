@@ -3,18 +3,22 @@ Functional prediction wrapper for PGPTracker.
 
 Predicts gene copy numbers using Hidden State Prediction (Castor/R) on phylogenetic tree.
 
-Performance Strategy:
+Performance Strategy (matching PICRUSt2 architecture):
+
+The R scripts process KO columns sequentially (not parallelized).
+Parallelization happens at the Python level by chunking KOs and processing chunks
+concurrently using ProcessPoolExecutor.
+
 1. High-RAM Mode (30GB+ available):
-   - Single R process with full multi-threading
-   - Loads entire KO table (10k+ genes) in memory
-   - Target: 10 min or less on 8 cores
-   - Bottleneck: R/Castor computation, not I/O
+   - Chunk size: 1000-2000 KOs per chunk
+   - Parallel workers: All available threads (e.g., 8 cores = 8 chunks running simultaneously)
+   - Each R process handles one chunk single-threaded
+   - Target: <10 min on 8 cores
 
 2. Low-RAM Mode (10-30GB available):
-   - Parallel batch processing using ProcessPoolExecutor
-   - Each batch: load subset → R prediction → merge
-   - Uses all available cores (4-16)
-   - Target: Max 60 min
+   - Chunk size: 500-1000 KOs per chunk (smaller chunks for RAM safety)
+   - Parallel workers: All available threads
+   - Target: <60 min max
 
 Minimum Requirements: 16GB total RAM, 4 CPU cores
 """
@@ -58,18 +62,12 @@ def _calculate_processing_strategy(
     threads: int = 1
 ) -> dict:
     """
-    Determine High-RAM vs Low-RAM mode based on available memory.
+    Calculate chunk size and worker count based on available RAM.
 
-    User Requirements:
-    - High-RAM (30GB+): Single R call with multi-threading, <10 min
-    - Low-RAM (10-30GB): Parallel batches, <60 min
-    - Minimum: 16GB total RAM required
-
-    RAM Estimation:
-    - KO table: ~19MB compressed → ~100MB uncompressed (Polars efficient)
-    - R overhead: ~1.5x table size (tree loading, intermediate matrices)
-    - High-RAM threshold: 30GB (enables R multi-threading)
-    - Low-RAM threshold: 10GB (minimum for safe batching)
+    Strategy (like PICRUSt2):
+    - Always use chunked parallel processing
+    - High-RAM: larger chunks (1000-2000 KOs), more parallel workers
+    - Low-RAM: smaller chunks (500-1000 KOs), RAM-safe batching
 
     Args:
         ko_db_path: Compressed KO reference database
@@ -77,7 +75,7 @@ def _calculate_processing_strategy(
         threads: Available CPU cores
 
     Returns:
-        {'strategy': 'high_ram'|'low_ram', 'chunk_size': int, 'threads': int, 'message': str}
+        {'chunk_size': int, 'workers': int, 'message': str}
     """
     if available_ram_gb is None:
         available_ram_gb = detect_free_memory()
@@ -98,33 +96,33 @@ def _calculate_processing_strategy(
         )
 
     # High-RAM Mode: 30GB+ available
+    # Use larger chunks and all available workers
     if available_ram_gb >= 30.0:
+        chunk_size = 1000  # PICRUSt2-style chunking (500-2000 range)
+        workers = threads  # Use all available CPUs
+        num_batches = (num_columns + chunk_size - 1) // chunk_size
+
         return {
-            'strategy': 'high_ram',
-            'chunk_size': num_columns,
-            'threads': threads,
-            'message': (f"High-RAM Mode: {available_ram_gb:.1f}GB available, "
-                        f"{threads} threads. Processing {num_columns} KOs (single R call, target <10min)")
+            'chunk_size': chunk_size,
+            'workers': workers,
+            'message': (f"High-RAM Mode: {available_ram_gb:.1f}GB available. "
+                        f"Processing {num_columns} KOs in {num_batches} chunks "
+                        f"({chunk_size} KOs/chunk, {workers} parallel workers, target <10min)")
         }
 
     # Low-RAM Mode: 10-30GB available
+    # Use smaller chunks for RAM safety
     else:
-        # Calculate batch size: each batch should use ~30% of available RAM
-        compressed_mb = ko_db_path.stat().st_size / (1024**2)
-        estimated_uncompressed_gb = (compressed_mb * 5) / 1024  # Conservative 5x expansion
-        safe_ram_per_batch = available_ram_gb * 0.3
-
-        cols_per_batch = int((safe_ram_per_batch / estimated_uncompressed_gb) * num_columns)
-        cols_per_batch = max(1000, min(cols_per_batch, 3000))  # Clamp to reasonable range
-
-        num_batches = (num_columns + cols_per_batch - 1) // cols_per_batch
+        chunk_size = 500  # Smaller chunks to avoid OOM
+        workers = min(threads, 4)  # Limit concurrent workers to avoid memory spikes
+        num_batches = (num_columns + chunk_size - 1) // chunk_size
 
         return {
-            'strategy': 'low_ram',
-            'chunk_size': cols_per_batch,
-            'threads': threads,
+            'chunk_size': chunk_size,
+            'workers': workers,
             'message': (f"Low-RAM Mode: {available_ram_gb:.1f}GB available. "
-                        f"Processing in {num_batches} parallel batches ({threads} workers, target <60min)")
+                        f"Processing {num_columns} KOs in {num_batches} chunks "
+                        f"({chunk_size} KOs/chunk, {workers} parallel workers, target <60min)")
         }
 
 
@@ -253,26 +251,20 @@ def _predict_ko_adaptive(
     threads: int
 ) -> Path:
     """
-    Predict KO gene copy numbers using adaptive RAM-aware strategy.
+    Predict KO gene copy numbers using chunked parallel processing.
 
-    Strategy Selection:
-    - High-RAM (30GB+): Single R process with full multi-threading
-      - Loads entire KO table (~10k columns) into memory
-      - Enables R/Castor to use all available threads (OMP_NUM_THREADS=threads)
-      - Fastest: Target <10 min on 8 cores
-
-    - Low-RAM (10-30GB): Parallel batch processing
-      - Splits KO table into chunks (1000-3000 columns each)
-      - Processes batches in parallel using ProcessPoolExecutor
-      - Each worker: load subset → R prediction → return result
-      - Safe: Target <60 min, no OOM risk
+    Architecture (matching PICRUSt2):
+    - Splits KO columns into chunks (500-2000 KOs per chunk)
+    - Processes chunks in parallel using ProcessPoolExecutor
+    - Each worker: load subset → R prediction (single-threaded) → return result
+    - Parallelization at Python level, not R level
 
     Args:
         tree: Phylogenetic tree from place_sequences()
         db_path: Compressed KO reference database (ko.txt.gz)
         output_path: Output path for predictions
-        chunk_size: Manual override (0=auto, -1=force high-RAM, >0=batch size)
-        threads: Available CPU cores
+        chunk_size: Manual override (0=auto, >0=custom chunk size)
+        threads: Available CPU cores (determines max_workers)
 
     Returns:
         Path to KO_predicted.tsv.gz
@@ -285,71 +277,42 @@ def _predict_ko_adaptive(
     # Manual Override
     if chunk_size and chunk_size > 0:
         final_chunk_size = chunk_size
-        strategy = 'low_ram'
-        print(f"  Manual Override: Batch size {final_chunk_size}")
-    elif chunk_size == -1:
-        strategy = 'high_ram'
-        final_chunk_size = 9999999
-        print("  Manual Override: Forced high-RAM mode")
+        final_workers = config['workers']
+        print(f"  Manual Override: Chunk size {final_chunk_size}, {final_workers} workers")
     else:
         final_chunk_size = int(config['chunk_size'])
-        strategy = config['strategy']
+        final_workers = int(config['workers'])
         print(f"  {config['message']}")
 
-    # 2. Execution
+    # 2. Prepare Batches
+    ko_lazy = pl.scan_csv(db_path, separator="\t", infer_schema_length=0)
+    all_columns = ko_lazy.collect_schema().names()
+    genome_col = all_columns[0]
+    ko_columns = all_columns[1:]
 
-    # --- HIGH-RAM MODE: Single R call with multi-threading ---
-    if strategy == 'high_ram':
-        print("  Loading full KO database into RAM...")
-        full_ko_df = pl.read_csv(db_path, separator="\t", infer_schema_length=0)
+    batches = [ko_columns[i:i+final_chunk_size] for i in range(0, len(ko_columns), final_chunk_size)]
+    print(f"  Processing {len(ko_columns)} KOs in {len(batches)} chunks using {final_workers} parallel workers...")
 
-        with tempfile.TemporaryDirectory(prefix="ko_highram_") as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
-            trait_file = temp_dir / "full_ko_trait.tsv"
-            temp_output = temp_dir / "full_ko_predicted.tsv"
+    # 3. Parallel Batch Processing (PICRUSt2-style)
+    with ProcessPoolExecutor(max_workers=final_workers) as executor:
+        futures = []
+        for i, batch_cols in enumerate(batches):
+            future = executor.submit(
+                _process_ko_batch,
+                db_path, tree, hsp_script, genome_col, batch_cols, i
+            )
+            futures.append(future)
 
-            full_ko_df.write_csv(trait_file, separator="\t")
+        # Collect results as they complete
+        batch_results = [future.result() for future in futures]
 
-            # Free RAM before calling R
-            del full_ko_df
-            gc.collect()
+    # 4. Merge Results Horizontally
+    final_result = batch_results[0]
+    for batch in batch_results[1:]:
+        batch = batch.drop("sequence")
+        final_result = pl.concat([final_result, batch], how="horizontal")
 
-            # Run R with multi-threading enabled
-            print(f"  Running HSP with {threads} threads...")
-            _run_r_script(hsp_script, [str(tree), str(trait_file), str(temp_output), "mp"], threads=threads)
-
-            final_result = pl.read_csv(temp_output, separator="\t")
-
-    # --- LOW-RAM MODE: Parallel batch processing ---
-    else:
-        print("  Processing KO table in parallel batches...")
-        ko_lazy = pl.scan_csv(db_path, separator="\t", infer_schema_length=0)
-        all_columns = ko_lazy.collect_schema().names()
-        genome_col = all_columns[0]
-        ko_columns = all_columns[1:]
-
-        batches = [ko_columns[i:i+final_chunk_size] for i in range(0, len(ko_columns), final_chunk_size)]
-
-        # Parallel batch processing using ProcessPoolExecutor
-        with ProcessPoolExecutor(max_workers=threads) as executor:
-            futures = []
-            for i, batch_cols in enumerate(batches):
-                future = executor.submit(
-                    _process_ko_batch,
-                    db_path, tree, hsp_script, genome_col, batch_cols, i
-                )
-                futures.append(future)
-
-            # Collect results as they complete
-            batch_results = [future.result() for future in futures]
-
-        # Merge horizontally
-        final_result = batch_results[0]
-        for batch in batch_results[1:]:
-            batch = batch.drop("sequence")
-            final_result = pl.concat([final_result, batch], how="horizontal")
-
-    # 3. Finalize and Save
+    # 5. Finalize and Save
     final_result = _ensure_ko_prefix(final_result)
 
     with gzip.open(output_path, 'wb') as f:
@@ -404,7 +367,7 @@ def _process_ko_batch(
         gc.collect()
 
         # Run R (single-threaded per worker, parallelism managed by ProcessPoolExecutor)
-        _run_r_script(hsp_script, [str(tree), str(batch_trait), str(batch_output), "mp"], threads=1)
+        _run_r_script(hsp_script, [str(tree), str(batch_trait), str(batch_output), "mp"])
 
         result = pl.read_csv(batch_output, separator="\t")
 
@@ -413,21 +376,22 @@ def _process_ko_batch(
 
 def _run_r_script(script_path: Path, args: list, threads: int = 1) -> None:
     """
-    Execute R script via subprocess with thread control.
+    Execute R script via subprocess.
 
     Args:
         script_path: Path to R script
         args: Command line arguments for the script
-        threads: Number of OpenMP threads R should use (default: 1)
+        threads: Number of OpenMP threads (always 1 for chunked parallelization)
 
-    Thread Strategy:
-    - High-RAM mode: threads > 1 enables R/Castor multi-threading
-    - Low-RAM mode: threads = 1 per worker (parallelism via ProcessPoolExecutor)
+    Note:
+    - R scripts process KO columns sequentially (not parallelized)
+    - Setting OMP_NUM_THREADS=1 prevents R from using multiple threads
+    - Parallelization happens at Python level via ProcessPoolExecutor
     """
     cmd = ["Rscript", str(script_path)] + args
 
     env = os.environ.copy()
-    env["OMP_NUM_THREADS"] = str(threads)
+    env["OMP_NUM_THREADS"] = "1"  # Single-threaded R, Python-level parallelization
 
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
