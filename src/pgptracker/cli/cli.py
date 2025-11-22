@@ -50,8 +50,7 @@ def setup_command(args: argparse.Namespace) -> int:
     # 2. Map environment names to their .yml files
     env_to_file_map = {
         ENV_MAP["qiime"]: "qiime2-amplicon-2025.10.yml",
-        ENV_MAP["Picrust2"]: "picrust2.yml",
-        # ENV_MAP["PGPTracker"]: "pgptracker.yml",
+        ENV_MAP["PGPTracker"]: "pgptracker.yml",
     }
 
     all_success = True
@@ -148,7 +147,7 @@ def create_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Set up the required Conda environments (qiime2-amplicon-2025.10, picrust2)"
+        help="Set up the required Conda environments (qiime2-amplicon-2025.10, pgptracker)"
     )
 
     setup_parser.add_argument(

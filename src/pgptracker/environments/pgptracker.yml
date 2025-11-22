@@ -1,0 +1,31 @@
+name: pgptracker
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Python runtime
+  - python=3.9
+  - pip
+
+  # Core Python dependencies
+  - polars>=0.20.0
+  - numpy
+  - pandas
+  - requests
+  - tqdm
+  - psutil
+
+  # Phylogenetic placement (SEPP algorithm)
+  - sepp=4.4.0
+
+  # Phylogenetic utilities (GAPPA for tree conversion)
+  - gappa>=0.8.0
+
+  # R and statistical packages for Hidden State Prediction
+  - r-base>=4.3
+  - r-castor>=1.7
+  - r-ape>=5.7
+
+  # Additional tools
+  - wget

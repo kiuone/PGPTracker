@@ -2,7 +2,7 @@
 Conda environment manager for PGPTracker.
 
 This module handles detection and execution of commands in the correct
-conda environments (qiime2, picrust2, or pgptracker).
+conda environments (qiime2 or pgptracker).
 """
 
 import subprocess
@@ -17,7 +17,6 @@ from datetime import date
 # Environment mapping
 ENV_MAP = {
     "qiime": "qiime2-amplicon-2025.10",
-    "Picrust2": "picrust2",
     "PGPTracker": "pgptracker"
 }
 
