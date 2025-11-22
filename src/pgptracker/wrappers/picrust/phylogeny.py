@@ -33,7 +33,7 @@ def place_sequences(
     - More accurate than de novo tree building for large reference trees
 
     Input sequences from: pipeline_st1.py → export_qza_files() → rep_seqs.fna
-    Reference tree: ~/.pgptracker/db/prokaryotic/pro_ref.tre (~20k genomes)
+    Reference tree: bundled database (src/pgptracker/databases/prokaryotic/pro_ref/pro_ref.tre) (~20k genomes)
 
     Returns:
         Path to placed_seqs.tre (Newick format with ASVs inserted)

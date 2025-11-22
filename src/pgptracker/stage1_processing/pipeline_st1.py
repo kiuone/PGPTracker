@@ -16,7 +16,7 @@ from pathlib import Path
 from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.wrappers.qiime.export_module import export_qza_files
 from pgptracker.utils.env_manager import (detect_available_cores, detect_available_memory,
-    get_output_dir, get_threads)
+    get_output_dir, get_threads, get_database_dir)
 from pgptracker.wrappers.picrust.phylogeny import place_sequences
 from pgptracker.wrappers.picrust.prediction import predict_functional_profiles
 from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
@@ -71,10 +71,10 @@ def run_pipeline(args: argparse.Namespace) -> int:
     # Build phylogenetic tree (SEPP/GAPPA)
     print("\nStep 3/9: Building phylogenetic tree...")
     print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
-    ref_db = Path.home() / ".pgptracker" / "db" / "prokaryotic"
-    if not ref_db.exists():
-        print(f"\n[ERROR] Reference database not found at {ref_db}")
-        print("Please run 'pgptracker setup' to download reference databases.")
+    try:
+        ref_db = get_database_dir()
+    except RuntimeError as e:
+        print(f"\n[ERROR] {e}", file=sys.stderr)
         return 1
     try:
         phylo_tree_path = place_sequences(

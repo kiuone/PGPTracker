@@ -21,7 +21,7 @@ from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
 from pgptracker.wrappers.qiime.classify import classify_taxonomy
 from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table
 from pgptracker.utils.validator import validate_output_file as _validate_output
-from pgptracker.utils.env_manager import get_output_dir, get_threads
+from pgptracker.utils.env_manager import get_output_dir, get_threads, get_database_dir
 from pgptracker.stage1_processing.unstrat_pgpt import generate_unstratified_pgpt
 from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
 from pgptracker.stage2_analysis.clr_normalize import apply_clr
@@ -72,10 +72,10 @@ def place_seqs_command(args: argparse.Namespace) -> int:
 
         _validate_output(seq_path, "place_seqs", "representative sequences")
 
-        ref_db = Path.home() / ".pgptracker" / "db" / "prokaryotic"
-        if not ref_db.exists():
-            print(f"\n[ERROR] Reference database not found at {ref_db}")
-            print("Please run 'pgptracker setup' to download reference databases.")
+        try:
+            ref_db = get_database_dir()
+        except RuntimeError as e:
+            print(f"\n[ERROR] {e}", file=sys.stderr)
             return 1
 
         tree_path = place_sequences(
@@ -100,10 +100,10 @@ def hsp_command(args: argparse.Namespace) -> int:
 
         _validate_output(tree_path, "hsp", "phylogenetic tree")
 
-        ref_db = Path.home() / ".pgptracker" / "db" / "prokaryotic"
-        if not ref_db.exists():
-            print(f"\n[ERROR] Reference database not found at {ref_db}")
-            print("Please run 'pgptracker setup' to download reference databases.")
+        try:
+            ref_db = get_database_dir()
+        except RuntimeError as e:
+            print(f"\n[ERROR] {e}", file=sys.stderr)
             return 1
 
         print(f"  -> Threads: {threads}")

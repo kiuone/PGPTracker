@@ -100,7 +100,7 @@ def predict_functional_profiles(
        - Each batch calls R/Castor independently, results merged horizontally
 
     Input tree comes from: pipeline_st1.py → place_sequences() → SEPP algorithm
-    Reference data from: ~/.pgptracker/db/prokaryotic/ (downloaded by setup command)
+    Reference data from: bundled database (src/pgptracker/databases/prokaryotic/)
 
     Args:
         chunk_size: 0=auto-detect, -1=force single-pass, >0=manual batch size
