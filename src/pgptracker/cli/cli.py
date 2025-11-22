@@ -109,6 +109,53 @@ def setup_command(args: argparse.Namespace) -> int:
         return 1
 
 
+def gui_command(args: argparse.Namespace) -> int:
+    """
+    Launch the PGPTracker Stage 2 Data Explorer GUI.
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        Exit code (0 for success, non-zero for failure)
+    """
+    import logging
+
+    # Configure logging
+    level = logging.INFO if args.verbose else logging.WARNING
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+
+    # Suppress overly verbose Dash logs unless in verbose mode
+    if not args.verbose:
+        logging.getLogger('dash').setLevel(logging.WARNING)
+        logging.getLogger('werkzeug').setLevel(logging.WARNING)
+
+    if args.verbose:
+        print("=" * 60)
+        print("PGPTracker Stage 2 Data Explorer")
+        print("=" * 60)
+        print(f"Starting server on http://0.0.0.0:{args.port}")
+        print(f"Debug mode: {not args.no_debug}")
+        print(f"Verbose logging: enabled")
+        print("Press Ctrl+C to stop the server")
+        print("=" * 60)
+
+    try:
+        from pgptracker.gui import run_app
+        run_app(debug=not args.no_debug, port=args.port)
+        return 0
+    except KeyboardInterrupt:
+        print("\nServer stopped by user")
+        return 0
+    except Exception as e:
+        print(f"ERROR: Failed to start GUI: {e}", file=sys.stderr)
+        return 1
+
+
 def create_parser() -> argparse.ArgumentParser:
     """
     Creates and configures the main argument parser.
@@ -157,7 +204,7 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     setup_parser.set_defaults(func=setup_command)
-    
+
     subcommands.register_export_command(subparsers)
     subcommands.register_place_seqs_command(subparsers)
     subcommands.register_hsp_command(subparsers)
@@ -166,10 +213,35 @@ def create_parser() -> argparse.ArgumentParser:
     subcommands.register_merge_command(subparsers)
     subcommands.register_stratify_pgpt_command(subparsers)
     subcommands.register_unstratify_pgpt_command(subparsers)
-    # STAGE 2 SUBCOMMANDS 
+    # STAGE 2 SUBCOMMANDS
     subcommands.register_clr_command(subparsers)
     subcommands.register_analysis_command(subparsers)
-    
+
+    # GUI command
+    gui_parser = subparsers.add_parser(
+        "gui",
+        help="Launch the PGPTracker Stage 2 Data Explorer GUI",
+        description="Launch the interactive web-based GUI for Stage 2 data visualization and analysis."
+    )
+    gui_parser.add_argument(
+        "--port",
+        type=int,
+        default=8050,
+        metavar="INT",
+        help="Port number for the server (default: 8050)"
+    )
+    gui_parser.add_argument(
+        "--no-debug",
+        action="store_true",
+        help="Disable debug mode"
+    )
+    gui_parser.add_argument(
+        "-v", "--verbose",
+        action="store_true",
+        help="Enable verbose logging"
+    )
+    gui_parser.set_defaults(func=gui_command)
+
     return parser
 
 def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
@@ -183,9 +255,10 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     input_group = parser.add_argument_group("input files")
     
     input_group.add_argument(
-        "--rep-seqs",
+        "--rep-seqs", "--input",
         type=str,
         metavar="PATH",
+        dest="rep_seqs",
         help="Path to representative sequences (.qza or .fna)"
     )
 
@@ -198,11 +271,12 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
                 "If not provided, the default Greengenes (2024.09) classifier "
                 "bundled with PGPTracker will be used."
     )
-    
+
     input_group.add_argument(
-        "--feature-table",
+        "--feature-table", "--table",
         type=str,
         metavar="PATH",
+        dest="feature_table",
         help="Path to feature table (.qza or .biom)"
     )
     
