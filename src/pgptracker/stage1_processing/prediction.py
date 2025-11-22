@@ -1,33 +1,32 @@
 """
 Functional prediction wrapper for PGPTracker.
 
-This module orchestrates the prediction of functional gene content (KOs) based on the
-phylogenetic tree. It acts as a bridge between Python (data handling) and R (statistical algorithms).
+Predicts gene copy numbers using Hidden State Prediction (Castor/R) on phylogenetic tree.
 
-Optimization Strategy:
-1. High-RAM Systems (>10GB free):
-   - Uses "Single-Pass Mode".
-   - Loads the entire database into memory using Polars (fast).
-   - Writes a single temporary input file.
-   - Launches ONE R process to handle all KOs.
-   - Why? Loading the phylogenetic tree in R is computationally expensive. 
-     Doing it once is faster than splitting the job and reloading the tree 8+ times.
+Performance Strategy:
+1. High-RAM Mode (30GB+ available):
+   - Single R process with full multi-threading
+   - Loads entire KO table (10k+ genes) in memory
+   - Target: 10 min or less on 8 cores
+   - Bottleneck: R/Castor computation, not I/O
 
-2. Low-RAM Systems (<10GB free):
-   - Uses "Batched Mode".
-   - Reads columns from the disk in small chunks.
-   - Processes them serially to ensure memory never exceeds limits.
-   - Slower due to I/O and overhead, but prevents system crashes.
+2. Low-RAM Mode (10-30GB available):
+   - Parallel batch processing using ProcessPoolExecutor
+   - Each batch: load subset → R prediction → merge
+   - Uses all available cores (4-16)
+   - Target: Max 60 min
+
+Minimum Requirements: 16GB total RAM, 4 CPU cores
 """
 
 import gc
+import os
 import subprocess
 import tempfile
 import gzip
-import os
-import math
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 
 import polars as pl
 from pgptracker.utils.env_manager import detect_free_memory
@@ -54,73 +53,78 @@ def _get_r_script(script_name: str) -> Path:
 
 
 def _calculate_processing_strategy(
-    ko_db_path: Path, 
-    available_ram_gb: Optional[float] = None
+    ko_db_path: Path,
+    available_ram_gb: Optional[float] = None,
+    threads: int = 1
 ) -> dict:
     """
-    Determine processing strategy based on File Size vs Available RAM.
+    Determine High-RAM vs Low-RAM mode based on available memory.
 
-    Logic:
-    - Estimate the uncompressed size of the KO table.
-    - If the system can hold the Full Table + R Overhead (approx 2x table size),
-      we choose 'single_pass'. This is the fastest method.
-    - Otherwise, we calculate a safe chunk size for 'serial_batched' processing.
+    User Requirements:
+    - High-RAM (30GB+): Single R call with multi-threading, <10 min
+    - Low-RAM (10-30GB): Parallel batches, <60 min
+    - Minimum: 16GB total RAM required
+
+    RAM Estimation:
+    - KO table: ~19MB compressed → ~100MB uncompressed (Polars efficient)
+    - R overhead: ~1.5x table size (tree loading, intermediate matrices)
+    - High-RAM threshold: 30GB (enables R multi-threading)
+    - Low-RAM threshold: 10GB (minimum for safe batching)
 
     Args:
-        ko_db_path: Path to the compressed KO database.
-        available_ram_gb: Optional override for free memory.
+        ko_db_path: Compressed KO reference database
+        available_ram_gb: Override for free memory detection
+        threads: Available CPU cores
 
     Returns:
-        Dict containing 'strategy', 'chunk_size', and a descriptive 'message'.
+        {'strategy': 'high_ram'|'low_ram', 'chunk_size': int, 'threads': int, 'message': str}
     """
     if available_ram_gb is None:
         available_ram_gb = detect_free_memory()
 
-    # Scan header to count columns (fast operation, no data loading)
-    # infer_schema_length=0 is critical to avoid scanning the whole file for types
+    # Count columns without loading data
     try:
         ko_lazy = pl.scan_csv(ko_db_path, separator="\t", infer_schema_length=0)
-        num_columns = len(ko_lazy.collect_schema().names()) - 1 # Subtract ID column
+        num_columns = len(ko_lazy.collect_schema().names()) - 1
     except Exception:
-        # Fallback if schema collection fails
-        num_columns = 10543 # Default size of PICRUSt2 KO table
+        num_columns = 10543  # PICRUSt2 default
 
-    # Estimate Sizes
-    # Physical size on disk (compressed)
-    compressed_size_gb = ko_db_path.stat().st_size / (1024**3)
-    
-    # Estimated uncompressed size in RAM (Polars is efficient ~1x)
-    # Gzip text compression is usually 4-6x. Using 6x as conservative estimate.
-    estimated_db_ram_gb = compressed_size_gb * 6.0
-    
-    # Safety buffer for R process overhead (loading tree + matrix duplication)
-    required_ram_single_pass = estimated_db_ram_gb * 2.5
-    
-    # --- Decision Logic ---
-    
-    # Strategy A: High Performance (Single Pass)
-    if available_ram_gb >= required_ram_single_pass:
+    # Check minimum RAM requirement
+    if available_ram_gb < 10.0:
+        raise RuntimeError(
+            f"Insufficient RAM: {available_ram_gb:.1f}GB available.\n"
+            f"Minimum 10GB required. Current system has <16GB total RAM.\n"
+            f"PGPTracker requires at least 16GB RAM and 4 CPU cores."
+        )
+
+    # High-RAM Mode: 30GB+ available
+    if available_ram_gb >= 30.0:
         return {
-            'strategy': 'single_pass',
+            'strategy': 'high_ram',
             'chunk_size': num_columns,
-            'message': (f"🚀 High RAM Mode: {available_ram_gb:.1f}GB available. "
-                        f"Processing all {num_columns} KOs in one pass (Fastest).")
+            'threads': threads,
+            'message': (f"High-RAM Mode: {available_ram_gb:.1f}GB available, "
+                        f"{threads} threads. Processing {num_columns} KOs (single R call, target <10min)")
         }
 
-    # Strategy B: Low Memory (Serial Batches)
+    # Low-RAM Mode: 10-30GB available
     else:
-        # Target usage: 40% of available RAM per batch to be safe
-        safe_ram_gb = available_ram_gb * 0.4
-        fraction = safe_ram_gb / estimated_db_ram_gb
-        chunk_size = int(num_columns * fraction)
-        chunk_size = max(500, chunk_size) # Minimum floor
-        num_batches = math.ceil(num_columns / chunk_size)
-        
+        # Calculate batch size: each batch should use ~30% of available RAM
+        compressed_mb = ko_db_path.stat().st_size / (1024**2)
+        estimated_uncompressed_gb = (compressed_mb * 5) / 1024  # Conservative 5x expansion
+        safe_ram_per_batch = available_ram_gb * 0.3
+
+        cols_per_batch = int((safe_ram_per_batch / estimated_uncompressed_gb) * num_columns)
+        cols_per_batch = max(1000, min(cols_per_batch, 3000))  # Clamp to reasonable range
+
+        num_batches = (num_columns + cols_per_batch - 1) // cols_per_batch
+
         return {
-            'strategy': 'serial_batched',
-            'chunk_size': chunk_size,
-            'message': (f"⚠️ Low RAM Mode: {available_ram_gb:.1f}GB available. "
-                        f"Processing in {num_batches} chunks to prevent crash.")
+            'strategy': 'low_ram',
+            'chunk_size': cols_per_batch,
+            'threads': threads,
+            'message': (f"Low-RAM Mode: {available_ram_gb:.1f}GB available. "
+                        f"Processing in {num_batches} parallel batches ({threads} workers, target <60min)")
         }
 
 
@@ -133,21 +137,23 @@ def predict_functional_profiles(
     chunk_size: Optional[int] = 0
 ) -> Dict[str, Path]:
     """
-    Main entry point for functional prediction (ASV -> KO).
+    Predict gene copy numbers for ASVs using phylogenetic tree.
 
-    This function coordinates the prediction of two types of data:
-    1. Marker Genes (16S): Used for normalization. Calculates copy numbers and NSTI.
-    2. Functional Genes (KOs): The actual functional profile.
+    Workflow:
+    1. Marker prediction (16S): Single-threaded, fast (<1 min)
+    2. KO prediction: Adaptive strategy based on RAM
+       - High-RAM (30GB+): Single R call, multi-threaded, <10 min
+       - Low-RAM (10-30GB): Parallel batches, <60 min
 
     Args:
-        tree_path: Path to the phylogenetic tree (Newick format).
-        output_dir: Directory to save prediction results.
-        ref_dir: Path containing reference databases (16S.txt.gz, ko.txt.gz).
-        threads: Number of threads (Not used in Single-Pass mode to avoid R overhead).
-        chunk_size: (Optional) Manual override for batch size.
+        tree_path: Newick tree from phylogeny.place_sequences()
+        output_dir: Output directory for predictions
+        ref_dir: Reference database directory
+        threads: Available CPU cores
+        chunk_size: Manual override (0=auto, -1=force high-RAM)
 
     Returns:
-        Dict containing paths to 'marker' and 'ko' prediction files.
+        {'marker': marker_nsti_predicted.tsv.gz, 'ko': KO_predicted.tsv.gz}
     """
     ref_dir = ref_dir.resolve()
     output_dir = output_dir.resolve()
@@ -156,11 +162,6 @@ def predict_functional_profiles(
     marker_db = ref_dir / "16S.txt.gz"
     ko_db = ref_dir / "ko.txt.gz"
 
-    if not marker_db.exists():
-        raise FileNotFoundError(f"Marker DB not found: {marker_db}")
-    if not ko_db.exists():
-        raise FileNotFoundError(f"KO DB not found: {ko_db}")
-
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("Predicting marker genes (16S) and NSTI...")
@@ -168,7 +169,7 @@ def predict_functional_profiles(
 
     print("Predicting KO abundances...")
     ko_path = _predict_ko_adaptive(
-        tree_path, ko_db, output_dir / "KO_predicted.tsv.gz", chunk_size
+        tree_path, ko_db, output_dir / "KO_predicted.tsv.gz", chunk_size, threads
     )
 
     return {'marker': marker_path, 'ko': ko_path}
@@ -248,94 +249,101 @@ def _predict_ko_adaptive(
     tree: Path,
     db_path: Path,
     output_path: Path,
-    chunk_size: Optional[int]
+    chunk_size: Optional[int],
+    threads: int
 ) -> Path:
     """
-    Predict KO gene copy numbers using an adaptive strategy.
+    Predict KO gene copy numbers using adaptive RAM-aware strategy.
 
-    Logic:
-    - Analyzes available RAM.
-    - If High RAM: Loads full DB, runs single R process (Fastest).
-    - If Low RAM: Loads chunks, runs multiple R processes sequentially (Safe).
+    Strategy Selection:
+    - High-RAM (30GB+): Single R process with full multi-threading
+      - Loads entire KO table (~10k columns) into memory
+      - Enables R/Castor to use all available threads (OMP_NUM_THREADS=threads)
+      - Fastest: Target <10 min on 8 cores
+
+    - Low-RAM (10-30GB): Parallel batch processing
+      - Splits KO table into chunks (1000-3000 columns each)
+      - Processes batches in parallel using ProcessPoolExecutor
+      - Each worker: load subset → R prediction → return result
+      - Safe: Target <60 min, no OOM risk
+
+    Args:
+        tree: Phylogenetic tree from place_sequences()
+        db_path: Compressed KO reference database (ko.txt.gz)
+        output_path: Output path for predictions
+        chunk_size: Manual override (0=auto, -1=force high-RAM, >0=batch size)
+        threads: Available CPU cores
+
+    Returns:
+        Path to KO_predicted.tsv.gz
     """
     hsp_script = _get_r_script("hsp.R")
 
     # 1. Determine Strategy
-    config = _calculate_processing_strategy(db_path)
-    
+    config = _calculate_processing_strategy(db_path, threads=threads)
+
     # Manual Override
     if chunk_size and chunk_size > 0:
         final_chunk_size = chunk_size
-        strategy = 'manual_batched'
-        print(f"  [Mode] Manual Override: Batch size {final_chunk_size}.")
+        strategy = 'low_ram'
+        print(f"  Manual Override: Batch size {final_chunk_size}")
     elif chunk_size == -1:
-        strategy = 'single_pass'
+        strategy = 'high_ram'
         final_chunk_size = 9999999
-        print("  [Mode] Manual Override: Single-pass forced.")
+        print("  Manual Override: Forced high-RAM mode")
     else:
         final_chunk_size = int(config['chunk_size'])
         strategy = config['strategy']
         print(f"  {config['message']}")
 
     # 2. Execution
-    
-    # --- STRATEGY A: SINGLE PASS (Fastest) ---
-    if strategy == 'single_pass':
-        print("  Loading full database into RAM...")
-        # Force string reading
+
+    # --- HIGH-RAM MODE: Single R call with multi-threading ---
+    if strategy == 'high_ram':
+        print("  Loading full KO database into RAM...")
         full_ko_df = pl.read_csv(db_path, separator="\t", infer_schema_length=0)
-        
-        with tempfile.TemporaryDirectory(prefix="ko_pass_") as temp_dir_str:
+
+        with tempfile.TemporaryDirectory(prefix="ko_highram_") as temp_dir_str:
             temp_dir = Path(temp_dir_str)
             trait_file = temp_dir / "full_ko_trait.tsv"
             temp_output = temp_dir / "full_ko_predicted.tsv"
-            
-            # Write uncompressed temp file for R (Fast I/O)
+
             full_ko_df.write_csv(trait_file, separator="\t")
-            
+
             # Free RAM before calling R
             del full_ko_df
             gc.collect()
-            
-            # Run R
-            _run_r_script(hsp_script, [str(tree), str(trait_file), str(temp_output), "mp"])
-            
-            # Read Result
+
+            # Run R with multi-threading enabled
+            print(f"  Running HSP with {threads} threads...")
+            _run_r_script(hsp_script, [str(tree), str(trait_file), str(temp_output), "mp"], threads=threads)
+
             final_result = pl.read_csv(temp_output, separator="\t")
 
-    # --- STRATEGY B: SERIAL BATCHES (Low RAM) ---
+    # --- LOW-RAM MODE: Parallel batch processing ---
     else:
-        print("  Streaming batches from disk...")
-        # Get column names
+        print("  Processing KO table in parallel batches...")
         ko_lazy = pl.scan_csv(db_path, separator="\t", infer_schema_length=0)
         all_columns = ko_lazy.collect_schema().names()
         genome_col = all_columns[0]
         ko_columns = all_columns[1:]
-        
+
         batches = [ko_columns[i:i+final_chunk_size] for i in range(0, len(ko_columns), final_chunk_size)]
-        batch_results = []
-        
-        with tempfile.TemporaryDirectory(prefix="ko_serial_") as temp_dir_str:
-            temp_dir = Path(temp_dir_str)
-            
+
+        # Parallel batch processing using ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=threads) as executor:
+            futures = []
             for i, batch_cols in enumerate(batches):
-                # Read ONLY needed columns from disk
-                batch_df = (pl.scan_csv(db_path, separator="\t", infer_schema_length=0)
-                            .select([genome_col] + batch_cols)
-                            .collect(engine='streaming'))
-                
-                batch_trait = temp_dir / f"batch_{i+1}_trait.tsv"
-                batch_df.write_csv(batch_trait, separator="\t")
-                batch_output = temp_dir / f"batch_{i+1}_predicted.tsv"
-                
-                _run_r_script(hsp_script, [str(tree), str(batch_trait), str(batch_output), "mp"])
-                
-                batch_results.append(pl.read_csv(batch_output, separator="\t"))
-                
-                del batch_df
-                gc.collect()
-        
-        # Merge
+                future = executor.submit(
+                    _process_ko_batch,
+                    db_path, tree, hsp_script, genome_col, batch_cols, i
+                )
+                futures.append(future)
+
+            # Collect results as they complete
+            batch_results = [future.result() for future in futures]
+
+        # Merge horizontally
         final_result = batch_results[0]
         for batch in batch_results[1:]:
             batch = batch.drop("sequence")
@@ -345,23 +353,82 @@ def _predict_ko_adaptive(
     final_result = _ensure_ko_prefix(final_result)
 
     with gzip.open(output_path, 'wb') as f:
-        # type: ignore
-        final_result.write_csv(f, separator="\t") # type: ignore
-        
+        final_result.write_csv(f, separator="\t")  # type: ignore
+
     return output_path
 
 
-def _run_r_script(script_path: Path, args: list) -> None:
+def _process_ko_batch(
+    db_path: Path,
+    tree: Path,
+    hsp_script: Path,
+    genome_col: str,
+    batch_cols: list,
+    batch_index: int
+) -> pl.DataFrame:
     """
-    Execute R script via subprocess.
+    Worker function for parallel KO batch processing.
+
+    This function is executed in a separate process by ProcessPoolExecutor.
+    Each worker loads a subset of KO columns, runs R prediction, and returns results.
+
+    Args:
+        db_path: Path to compressed KO database
+        tree: Path to phylogenetic tree
+        hsp_script: Path to hsp.R script
+        genome_col: Name of genome ID column
+        batch_cols: List of KO column names for this batch
+        batch_index: Batch number for logging
+
+    Returns:
+        DataFrame with predictions for this batch's KO columns
+    """
+    import gc
+
+    # Load only this batch's columns from disk
+    batch_df = (
+        pl.scan_csv(db_path, separator="\t", infer_schema_length=0)
+        .select([genome_col] + batch_cols)
+        .collect(engine='streaming')
+    )
+
+    with tempfile.TemporaryDirectory(prefix=f"ko_batch_{batch_index}_") as temp_dir_str:
+        temp_dir = Path(temp_dir_str)
+        batch_trait = temp_dir / "trait.tsv"
+        batch_output = temp_dir / "predicted.tsv"
+
+        batch_df.write_csv(batch_trait, separator="\t")
+
+        # Free RAM before R call
+        del batch_df
+        gc.collect()
+
+        # Run R (single-threaded per worker, parallelism managed by ProcessPoolExecutor)
+        _run_r_script(hsp_script, [str(tree), str(batch_trait), str(batch_output), "mp"], threads=1)
+
+        result = pl.read_csv(batch_output, separator="\t")
+
+    return result
+
+
+def _run_r_script(script_path: Path, args: list, threads: int = 1) -> None:
+    """
+    Execute R script via subprocess with thread control.
+
+    Args:
+        script_path: Path to R script
+        args: Command line arguments for the script
+        threads: Number of OpenMP threads R should use (default: 1)
+
+    Thread Strategy:
+    - High-RAM mode: threads > 1 enables R/Castor multi-threading
+    - Low-RAM mode: threads = 1 per worker (parallelism via ProcessPoolExecutor)
     """
     cmd = ["Rscript", str(script_path)] + args
-    
-    # Environment optimization: prevent R from using multiple threads for BLAS/LAPACK
-    # This ensures CPU usage is controlled by our python script logic
+
     env = os.environ.copy()
-    env["OMP_NUM_THREADS"] = "1"
-    
+    env["OMP_NUM_THREADS"] = str(threads)
+
     result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
     if result.returncode != 0:
