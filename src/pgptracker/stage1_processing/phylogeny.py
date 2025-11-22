@@ -137,6 +137,8 @@ def _run_gappa(jplace_file: Path, output_tree: Path) -> None:
 
     GAPPA grafts placed sequences onto reference tree at their insertion points.
     Output used by R/Castor for Hidden State Prediction (needs Newick format).
+
+    Note: GAPPA creates files with .newick extension, which we rename to .tre
     """
     cmd = [
         "gappa", "examine", "graft",
@@ -153,3 +155,14 @@ def _run_gappa(jplace_file: Path, output_tree: Path) -> None:
             f"GAPPA failed with exit code {result.returncode}\n"
             f"STDERR: {result.stderr}"
         )
+
+    # GAPPA creates {prefix}.newick, rename to expected .tre extension
+    gappa_output = output_tree.parent / f"{output_tree.stem}.newick"
+    if not gappa_output.exists():
+        raise FileNotFoundError(
+            f"GAPPA finished but did not create {gappa_output}\n"
+            f"Files in output directory: {list(output_tree.parent.glob('*'))}"
+        )
+
+    # Rename to .tre extension as expected by prediction.py
+    gappa_output.rename(output_tree)

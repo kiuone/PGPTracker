@@ -111,6 +111,7 @@ class TestPredictFunctionalProfiles:
         ref_dir = tmp_path / "ref"
 
         tree_path.write_text("(seq1:0.5);")
+        ref_dir.mkdir()
 
         (ref_dir / "16S.txt.gz").write_text("genome\t16S\ng1\t4\n")
         (ref_dir / "ko.txt.gz").write_text("genome\tKO0001\ng1\t1.5\n")
@@ -240,13 +241,28 @@ class TestPredictKoAdaptive:
         })
         ko_df.write_csv(db_path, separator="\t")
 
-        with patch('pgptracker.stage1_processing.prediction._get_r_script'), \
-             patch('pgptracker.stage1_processing.prediction._process_batch') as mock_batch:
+        call_count = 0
 
-            mock_batch.return_value = pl.DataFrame({
-                "sequence": ["seq1"],
-                "KO0001": [1.0]
-            })
+        def mock_batch_side_effect(*args, **kwargs):
+            nonlocal call_count
+            # Each batch returns different KO columns
+            if call_count == 0:
+                # First batch: KO0000-KO0049
+                result = pl.DataFrame({
+                    "sequence": ["seq1"],
+                    **{f"KO{i:04d}": [float(i)] for i in range(50)}
+                })
+            else:
+                # Second batch: KO0050-KO0099
+                result = pl.DataFrame({
+                    "sequence": ["seq1"],
+                    **{f"KO{i:04d}": [float(i)] for i in range(50, 100)}
+                })
+            call_count += 1
+            return result
+
+        with patch('pgptracker.stage1_processing.prediction._get_r_script'), \
+             patch('pgptracker.stage1_processing.prediction._process_batch', side_effect=mock_batch_side_effect) as mock_batch:
 
             result = _predict_ko_adaptive(tree, db_path, output_path, chunk_size=50, threads=1)
 

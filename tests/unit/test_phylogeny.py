@@ -132,11 +132,14 @@ class TestRunSepp:
         output_dir.mkdir()
 
         mock_result = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        expected_json = output_dir / "placement_placement.json"
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            expected_json = output_dir / "placement_placement.json"
+        def create_output(*args, **kwargs):
+            # Create the output file when subprocess.run is called
             expected_json.write_text('{"placements": []}')
+            return mock_result
 
+        with patch('subprocess.run', side_effect=create_output) as mock_run:
             result = _run_sepp(seqs, ref_tree, ref_aln, ref_info, output_dir, threads=4)
 
             assert result == expected_json
@@ -166,11 +169,13 @@ class TestRunSepp:
         output_dir.mkdir()
 
         mock_result = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+        output_json = output_dir / "placement_placement.json"
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
-            output_json = output_dir / "placement_placement.json"
+        def create_output(*args, **kwargs):
             output_json.write_text('{}')
+            return mock_result
 
+        with patch('subprocess.run', side_effect=create_output) as mock_run:
             _run_sepp(seqs, ref_tree, ref_aln, ref_info, output_dir, threads=2)
 
             cmd = mock_run.call_args[0][0]
@@ -242,8 +247,18 @@ class TestRunGappa:
 
         mock_result = CompletedProcess(args=[], returncode=0, stdout="", stderr="")
 
-        with patch('subprocess.run', return_value=mock_result) as mock_run:
+        def create_newick(*args, **kwargs):
+            # GAPPA creates .newick file
+            newick_file = tmp_path / "placed_seqs.newick"
+            newick_file.write_text("(seq1:0.5);")
+            return mock_result
+
+        with patch('subprocess.run', side_effect=create_newick) as mock_run:
             _run_gappa(jplace_file, output_tree)
+
+            # Verify file was renamed to .tre
+            assert output_tree.exists()
+            assert not (tmp_path / "placed_seqs.newick").exists()
 
             mock_run.assert_called_once()
             cmd = mock_run.call_args[0][0]
