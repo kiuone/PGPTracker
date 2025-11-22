@@ -245,7 +245,7 @@ def _predict_ko_adaptive(
         if threads > 1 and num_batches > 1:
             with ProcessPoolExecutor(max_workers=min(threads, num_batches)) as executor:
                 batch_results = list(executor.map(
-                    lambda args: _process_batch(*args),
+                    _process_batch_wrapper,
                     [(i+1, batch, db_path, genome_col, tree, hsp_script, temp_dir)
                      for i, batch in enumerate(batches)]
                 ))
@@ -264,6 +264,16 @@ def _predict_ko_adaptive(
 
     final_result.write_csv(output_path, separator="\t")
     return output_path
+
+
+def _process_batch_wrapper(args):
+    """
+    Wrapper for _process_batch to enable pickling with ProcessPoolExecutor.
+
+    Unpacks tuple of arguments and calls _process_batch.
+    This is needed because lambda functions cannot be pickled.
+    """
+    return _process_batch(*args)
 
 
 @profile_memory
