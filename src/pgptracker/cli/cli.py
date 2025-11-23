@@ -36,25 +36,24 @@ from pgptracker.utils.env_manager import check_environment_exists, ENV_MAP
 def setup_command(args: argparse.Namespace) -> int:
     """
     Executes the Conda environment creation or update.
-    Ensures all environments match the required .yml files.
     """
-    print("PGPTracker - Environment Setup")
-    
-    # 1. Get the path to the packaged .yml files
+    print("PGPTracker - Environment Setup\n")
+
+    all_success = True
+
+    # Get the path to the packaged .yml files
     try:
         env_files_path = importlib.resources.files("pgptracker") / "environments"
     except Exception as e:
         print(f"Critical Error: Could not find the 'environments' folder. {e}")
         return 1
-    
-    # 2. Map environment names to their .yml files
+
+    # Map environment names to their .yml files
     env_to_file_map = {
         ENV_MAP["qiime"]: "qiime2-amplicon-2025.10.yml",
-        ENV_MAP["Picrust2"]: "picrust2.yml",
-        # ENV_MAP["PGPTracker"]: "pgptracker.yml",
+        ENV_MAP["PGPTracker"]: "pgptracker.yml",
     }
 
-    all_success = True
     if args.force:
         print("Checking and syncing environments (--force enabled)...")
     else:
@@ -68,13 +67,13 @@ def setup_command(args: argparse.Namespace) -> int:
             print(f"\n[ERROR] Environment file not found: {yml_path}")
             print(f"       Cannot create or update environment '{env_name}'.")
             all_success = False
-            continue 
+            continue
 
         cmd = []
         action_text = ""
 
         env_exists = check_environment_exists(env_name)
-        
+
         if env_exists and not args.force:
             print(f"[INFO] Environment '{env_name}' already exists. Skipping.")
             continue
@@ -88,7 +87,7 @@ def setup_command(args: argparse.Namespace) -> int:
             with importlib.resources.as_file(yml_path) as yml_real_path:
                 cmd = ["conda", "env", "create", "--name", env_name, "-f", str(yml_path)]
             action_text = "created"
-            
+
         print("       This may take several minutes...")
 
         try:
@@ -101,12 +100,34 @@ def setup_command(args: argparse.Namespace) -> int:
             print("[ERROR] 'conda' command not found. Is Conda installed and in your PATH?", file=sys.stderr)
             all_success = False
             break
-            
+
     if all_success:
-        print("Setup completed successfully!")
+        print("\nSetup completed successfully!")
         return 0
     else:
         print("Setup failed for one or more environments.", file=sys.stderr)
+        return 1
+
+
+def gui_command(args: argparse.Namespace) -> int:
+    """
+    Launch the PGPTracker Stage 2 Data Explorer GUI (Streamlit).
+
+    Args:
+        args: Parsed command-line arguments
+
+    Returns:
+        Exit code (0 for success, non-zero for failure)
+    """
+    try:
+        from pgptracker.gui import run_app
+        results_dir = args.results_dir if hasattr(args, 'results_dir') and args.results_dir else None
+        run_app(results_dir=results_dir, port=args.port)
+        return 0
+    except KeyboardInterrupt:
+        return 0
+    except Exception as e:
+        print(f"ERROR: Failed to start GUI: {e}", file=sys.stderr)
         return 1
 
 
@@ -148,17 +169,17 @@ def create_parser() -> argparse.ArgumentParser:
 
     setup_parser = subparsers.add_parser(
         "setup",
-        help="Set up the required Conda environments (qiime2-amplicon-2025.10, picrust2)"
+        help="Set up required Conda environments (qiime2-amplicon-2025.10, pgptracker)"
     )
 
     setup_parser.add_argument(
         "-f", "--force",
         action="store_true",
         help="Force update of existing environments to match .yml files"
-        )
-    
+    )
+
     setup_parser.set_defaults(func=setup_command)
-    
+
     subcommands.register_export_command(subparsers)
     subcommands.register_place_seqs_command(subparsers)
     subcommands.register_hsp_command(subparsers)
@@ -167,10 +188,32 @@ def create_parser() -> argparse.ArgumentParser:
     subcommands.register_merge_command(subparsers)
     subcommands.register_stratify_pgpt_command(subparsers)
     subcommands.register_unstratify_pgpt_command(subparsers)
-    # STAGE 2 SUBCOMMANDS 
+    # STAGE 2 SUBCOMMANDS
     subcommands.register_clr_command(subparsers)
     subcommands.register_analysis_command(subparsers)
-    
+
+    # GUI command
+    gui_parser = subparsers.add_parser(
+        "gui",
+        help="Launch the PGPTracker Stage 2 Data Explorer GUI",
+        description="Launch the interactive web-based GUI for Stage 2 data visualization and analysis."
+    )
+    gui_parser.add_argument(
+        "--port",
+        type=int,
+        default=8501,
+        metavar="INT",
+        help="Port number for the Streamlit server (default: 8501)"
+    )
+    gui_parser.add_argument(
+        "--results-dir",
+        type=str,
+        metavar="PATH",
+        default=None,
+        help="Path to results directory for auto-loading data"
+    )
+    gui_parser.set_defaults(func=gui_command)
+
     return parser
 
 def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
@@ -184,9 +227,10 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     input_group = parser.add_argument_group("input files")
     
     input_group.add_argument(
-        "--rep-seqs",
+        "--rep-seqs", "--input",
         type=str,
         metavar="PATH",
+        dest="rep_seqs",
         help="Path to representative sequences (.qza or .fna)"
     )
 
@@ -199,11 +243,12 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
                 "If not provided, the default Greengenes (2024.09) classifier "
                 "bundled with PGPTracker will be used."
     )
-    
+
     input_group.add_argument(
-        "--feature-table",
+        "--feature-table", "--table",
         type=str,
         metavar="PATH",
+        dest="feature_table",
         help="Path to feature table (.qza or .biom)"
     )
     
@@ -221,9 +266,9 @@ def _add_process_arguments(parser: argparse.ArgumentParser) -> None:
     params_group.add_argument(
         "--chunk-size",
         type=int,
-        default=1000,
+        default=0,
         metavar="INT",
-        help="Gene families per chunk for hsp.py (default: 1000)"
+        help="KO columns per batch: 0=auto-detect, -1=no chunking, >0=manual (default: 0)"
     )
     
     params_group.add_argument(
@@ -351,23 +396,28 @@ def main() -> int:
         # This code only runs if args.func() completes successfully.
         if profile_name and MemoryProfiler.is_enabled():
             MemoryProfiler.disable()
-            
-            config = get_config()
-            
-            # 1. Generate TSV
-            # Determine output dir: use subcommand's dir, or default
-            output_dir = Path("results") # Default
-            if hasattr(args, 'output') and args.output:
-                output_dir = Path(args.output)
-            
-            output_dir.mkdir(parents=True, exist_ok=True)
-            report_path = output_dir / f"pgptracker_profile_{args.profile}_{datetime.now():%Y%m%d_%H%M%S}.tsv"
 
-            generate_tsv_report(report_path)
+            # Check if any profiling data was collected
+            if len(MemoryProfiler.get_profiles()) > 0:
+                config = get_config()
 
-            # 2. Print Pretty Table
-            if config.show_pretty_table:
-                print_pretty_table()
+                # 1. Generate TSV
+                # Determine output dir: use subcommand's dir, or default
+                output_dir = Path("results") # Default
+                if hasattr(args, 'output') and args.output:
+                    output_dir = Path(args.output)
+
+                output_dir.mkdir(parents=True, exist_ok=True)
+                report_path = output_dir / f"pgptracker_profile_{args.profile}_{datetime.now():%Y%m%d_%H%M%S}.tsv"
+
+                generate_tsv_report(report_path)
+
+                # 2. Print Pretty Table
+                if config.show_pretty_table:
+                    print_pretty_table()
+            else:
+                print("[WARNING] Profiler was enabled but no data was collected. "
+                      "Check that profiled functions were executed and module filters are correct.")
         
         return exit_code
     

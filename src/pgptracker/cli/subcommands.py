@@ -15,13 +15,13 @@ import polars as pl
 # Local imports
 from pgptracker.utils.validator import ValidationError
 from pgptracker.wrappers.qiime.export_module import export_qza_files
-from pgptracker.wrappers.picrust.place_seqs import build_phylogenetic_tree
-from pgptracker.wrappers.picrust.hsp_prediction import predict_gene_content
+from pgptracker.stage1_processing.phylogeny import place_sequences
+from pgptracker.stage1_processing.prediction import predict_functional_profiles
 from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
 from pgptracker.wrappers.qiime.classify import classify_taxonomy
 from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table
 from pgptracker.utils.validator import validate_output_file as _validate_output
-from pgptracker.utils.env_manager import get_output_dir, get_threads
+from pgptracker.utils.env_manager import get_output_dir, get_threads, get_database_dir
 from pgptracker.stage1_processing.unstrat_pgpt import generate_unstratified_pgpt
 from pgptracker.stage1_processing.strat_pgpt import generate_stratified_analysis
 from pgptracker.stage2_analysis.clr_normalize import apply_clr
@@ -69,12 +69,19 @@ def place_seqs_command(args: argparse.Namespace) -> int:
         output_dir = get_output_dir(args.output)
         threads = get_threads(args.threads)
         seq_path = Path(args.sequences_fna)
-        
+
         _validate_output(seq_path, "place_seqs", "representative sequences")
 
-        tree_path = build_phylogenetic_tree(
-            sequences_path=seq_path,
+        try:
+            ref_db = get_database_dir()
+        except RuntimeError as e:
+            print(f"\n[ERROR] {e}", file=sys.stderr)
+            return 1
+
+        tree_path = place_sequences(
+            seqs_path=seq_path,
             output_dir=output_dir,
+            ref_dir=ref_db,
             threads=threads
         )
         print(f"\nPhylogenetic tree build successful:")
@@ -92,13 +99,20 @@ def hsp_command(args: argparse.Namespace) -> int:
         tree_path = Path(args.tree)
 
         _validate_output(tree_path, "hsp", "phylogenetic tree")
-        
+
+        try:
+            ref_db = get_database_dir()
+        except RuntimeError as e:
+            print(f"\n[ERROR] {e}", file=sys.stderr)
+            return 1
+
         print(f"  -> Threads: {threads}")
         print(f"  -> Chunk size: {args.chunk_size}")
-        
-        predicted_paths = predict_gene_content(
+
+        predicted_paths = predict_functional_profiles(
             tree_path=tree_path,
             output_dir=output_dir,
+            ref_dir=ref_db,
             threads=threads,
             chunk_size=args.chunk_size
         )
@@ -347,7 +361,7 @@ def register_hsp_command(subparsers: argparse._SubParsersAction):
     predict_parser.add_argument("--tree", type=str, required=True, metavar="PATH", help="Path to phylogenetic tree (e.g., placed_seqs.tre)")
     predict_parser.add_argument("-o", "--output", type=str, metavar="PATH", help="Output directory (default: results/run_DD-MM-YYYY)")
     predict_parser.add_argument("-t", "--threads", type=int, metavar="INT", help="Number of threads (default: auto-detect)")
-    predict_parser.add_argument("--chunk-size", type=int, default=1000, metavar="INT", help="Gene families per chunk for hsp.py (default: 1000)")
+    predict_parser.add_argument("--chunk-size", type=int, default=0, metavar="INT", help="KO columns per batch: 0=auto-detect, -1=no chunking, >0=manual (default: 0)")
     predict_parser.set_defaults(func=hsp_command)
 
 def register_metagenome_command(subparsers: argparse._SubParsersAction):

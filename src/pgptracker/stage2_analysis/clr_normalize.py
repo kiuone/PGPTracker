@@ -2,7 +2,7 @@
 
 from skbio.stats.composition import clr, multi_replace
 import polars as pl
-import numpy as np
+import numpy as np 
 from typing import Dict, List
 from pathlib import Path
 import shutil

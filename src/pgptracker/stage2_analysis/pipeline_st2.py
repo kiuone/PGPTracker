@@ -17,12 +17,14 @@ from pgptracker.stage2_analysis.statistics import (
 from pgptracker.stage2_analysis.clustering_ML import (
     run_random_forest, run_lasso_cv, run_boruta)
 from pgptracker.stage2_analysis.visualizations import (
-    plot_ordination, plot_alpha_diversity, plot_feature_importance, 
+    plot_ordination, plot_alpha_diversity, plot_feature_importance,
     plot_volcano, plot_heatmap)
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 # Setup Logger
 logger = logging.getLogger(__name__)
 
+@profile_memory
 def run_stage2_pipeline(args: argparse.Namespace):
     """
     Main orchestrator for Stage 2: Analysis & Statistical Modeling.

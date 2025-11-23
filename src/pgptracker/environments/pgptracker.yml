@@ -1,0 +1,45 @@
+name: pgptracker
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+dependencies:
+  # Core Python Runtime
+  - python=3.10
+  - pip
+
+  # Bioinformatics Core (Pinned for Stability)
+  # These versions must be pinned together to prevent SEPP/DendroPy conflicts
+  - sepp=4.5.5
+  - dendropy=5.0.1
+  - gappa>=0.8.0
+  - hmmer>=3.1b2
+  - mafft>=7.0
+
+  # R Stack for Hidden State Prediction (HSP)
+  - r-base>=4.3
+  - r-castor>=1.7.2
+  - r-ape>=5.7
+
+  # Data Science & Statistics
+  - polars>=1.0.0
+  - pandas>=2.0.0
+  - numpy>=1.23.0
+  - scipy>=1.10.0
+  - scikit-learn>=1.3.0
+  - scikit-bio>=0.6.0
+  - statsmodels
+
+  # Utilities
+  - requests
+  - tqdm
+  - psutil
+  - wget
+  - pyyaml
+
+  # GUI and Visualization (Pip)
+  - pip:
+    - streamlit>=1.30.0
+    - plotly>=5.18.0
+    - boruta
+    - kaleido  # For static image export in Plotly

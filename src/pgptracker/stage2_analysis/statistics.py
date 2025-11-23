@@ -4,6 +4,7 @@ import numpy as np
 import scipy.stats as ss
 from typing import List, Optional, Literal
 from statsmodels.stats.multitest import multipletests
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 def _prepare_stats_long_df(
     df_wide_N_D: pl.DataFrame,
@@ -52,6 +53,7 @@ def _prepare_stats_long_df(
     
     return df_long
 
+@profile_memory
 def kruskal_wallis_test(
     df_wide_N_D: pl.DataFrame,
     metadata: pl.DataFrame,
@@ -118,6 +120,7 @@ def kruskal_wallis_test(
     ).sort("Feature")
 
 
+@profile_memory
 def mann_whitney_u_test(
     df_wide_N_D: pl.DataFrame,
     metadata: pl.DataFrame,

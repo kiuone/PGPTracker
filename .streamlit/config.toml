@@ -1,0 +1,15 @@
+# Streamlit configuration for PGPTracker GUI
+
+[server]
+# Increase max upload size to 2GB for large microbiome tables
+maxUploadSize = 2000
+
+# Increase max message size to 1GB for bioinformatics data (stratified tables)
+maxMessageSize = 1000
+
+# Run in headless mode for server deployments
+headless = true
+
+[browser]
+# Don't try to open browser automatically
+gatherUsageStats = false

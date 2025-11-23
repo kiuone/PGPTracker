@@ -21,8 +21,7 @@ seaborn
 plotly
 
 # GUI
-# gooey
-# dash
+streamlit
 
 # Utilities
 pyyaml

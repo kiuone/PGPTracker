@@ -8,6 +8,7 @@ import skbio.diversity
 import skbio.stats.distance
 from scipy.spatial.distance import euclidean
 from typing import List, Literal, Dict, Any, Tuple
+from pgptracker.utils.profiling_tools.profiler import profile_memory
 
 # Define the literal type for Pylance/MyPy
 AlphaMetric = Literal['observed_features', 'shannon', 'simpson', 'pielou_e']
@@ -54,6 +55,7 @@ def _prepare_skbio_beta(
         matrix = df_wide.drop(id_col).to_numpy().T # Transpose
         return matrix, list(sample_ids)
 
+@profile_memory
 def calculate_alpha_diversity(
     df_wide_N_D_raw: pl.DataFrame,
     sample_id_col: str,
@@ -118,6 +120,7 @@ def calculate_alpha_diversity(
             
     return pl.DataFrame(results_list)
 
+@profile_memory
 def calculate_beta_diversity(
     df_wide: pl.DataFrame,
     id_col: str,

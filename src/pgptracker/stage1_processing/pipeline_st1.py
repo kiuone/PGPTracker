@@ -16,9 +16,9 @@ from pathlib import Path
 from pgptracker.utils.validator import validate_inputs, ValidationError
 from pgptracker.wrappers.qiime.export_module import export_qza_files
 from pgptracker.utils.env_manager import (detect_available_cores, detect_available_memory,
-    get_output_dir, get_threads)
-from pgptracker.wrappers.picrust.place_seqs import build_phylogenetic_tree
-from pgptracker.wrappers.picrust.hsp_prediction import predict_gene_content
+    get_output_dir, get_threads, get_database_dir)
+from pgptracker.stage1_processing.phylogeny import place_sequences
+from pgptracker.stage1_processing.prediction import predict_functional_profiles
 from pgptracker.stage1_processing.gen_ko_abun import run_metagenome_pipeline
 from pgptracker.wrappers.qiime.classify import classify_taxonomy
 from pgptracker.stage1_processing.merge_tax_abun import merge_taxonomy_to_table
@@ -68,29 +68,32 @@ def run_pipeline(args: argparse.Namespace) -> int:
     # Define PICRUSt2 output directory
     picrust_dir = inputs['output'] / "picrust2_intermediates"
     
-    # Build phylogenetic tree (PICRUSt2)
+    # Build phylogenetic tree (SEPP/GAPPA)
     print("\nStep 3/9: Building phylogenetic tree...")
     print(f" -> Using sequences: {exported['sequences']}") # Using the .fna exported
-    print(" -> Running PICRUSt2 place_seqs.py (Douglas et al., 2020)")
     try:
-        phylo_tree_path = build_phylogenetic_tree(
-            sequences_path=exported['sequences'],
+        ref_db = get_database_dir()
+    except RuntimeError as e:
+        print(f"\n[ERROR] {e}", file=sys.stderr)
+        return 1
+    try:
+        phylo_tree_path = place_sequences(
+            seqs_path=exported['sequences'],
             output_dir=picrust_dir,
+            ref_dir=ref_db,
             threads=threads
         )
     except (FileNotFoundError, RuntimeError, subprocess.CalledProcessError) as e:
         print(f"\n[PHYLO ERROR] Phylogenetic tree build failed: {e}", file=sys.stderr)
         return 1
     
-    # Predict gene content (PICRUSt2)
+    # Predict gene content (Castor HSP)
     print("\nStep 4/9: Predicting gene content...")
-    print("  -> Running PICRUSt2 hsp.py for marker genes (Douglas et al., 2020)")
-    print("  -> Running PICRUSt2 hsp.py for KO predictions (Douglas et al., 2020)")
     try:
-        # TODO: Add logic to pass chunk_size from args if needed
-        predicted_paths = predict_gene_content(
+        predicted_paths = predict_functional_profiles(
             tree_path=phylo_tree_path,
             output_dir=picrust_dir,
+            ref_dir=ref_db,
             threads=threads,
             chunk_size=args.chunk_size
         )
