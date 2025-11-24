@@ -81,6 +81,7 @@ pgptracker process \
 #### Stage 2: Statistical Analysis & ML
 
 Analyze the output against your metadata to find significant differences and predictive features.
+Here is an example for the stratified table:
 
 ```bash
 pgptracker analysis \
@@ -90,6 +91,27 @@ pgptracker analysis \
     --group-col Treatment \
     --target-col pH \
     --ml-type regression
+```
+Here is two more examples to run the stage 2 with the unstratified table:
+
+```bash
+pgptracker analysis \
+  -i my_project_output/unstratified_pgpt_Lv3_abundances.tsv \
+  -m path/to/metadata.tsv \
+  -o my_project_output/analysis_regression_ph \
+  --feature-col-name Lv3 \
+  --group-col env_biome \
+  --target-col ph \
+  --ml-type regression
+
+pgptracker analysis \
+  -i my_project_output/unstratified_pgpt_Lv3_abundances.tsv \
+  -m path/to/metadata.tsv \
+  -o my_project_output/analysis_classification \
+  --feature-col-name Lv3 \
+  --group-col env_feature \
+  --target-col env_feature \
+  --ml-type classification
 ```
 
 #### GUI: Interactive Exploration
@@ -170,24 +192,6 @@ PGPTracker generates a structured results folder:
 | `machine_learning/` | `random_forest_importance.tsv`, `boruta_selection.tsv`, `lasso_coefficients.tsv`, Feature Importance plots. |
 | `picrust2_intermediates/` | Raw output from the PICRUSt2 adapted steps (trees, KO predictions). |
 | `taxonomy/` | QIIME 2 classification artifacts and exported TSV files. |
-
------
-
-## Performance Tuning
-
-PGPTracker includes a custom **Memory Profiler** to help manage resources on large datasets.
-
-You can enable profiling on any command by adding the `--profile` flag:
-
-```bash
-# Profiles using the 'production' preset (warns if >5GB RAM)
-pgptracker process [...] --profile
-
-# Profiles using 'debug' preset (more verbose)
-pgptracker analysis [...] --profile debug
-```
-
-A TSV report and a summary table of memory usage per function will be generated after execution.
 
 -----
 
