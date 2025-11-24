@@ -10,7 +10,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from subprocess import CompletedProcess
-from pgptracker.stage1_processing.phylogeny import place_sequences, _run_sepp, _run_gappa
+from pgptracker.stage1_processing.b_phylogeny import place_sequences, _run_sepp, _run_gappa
 
 
 class TestPlaceSequences:

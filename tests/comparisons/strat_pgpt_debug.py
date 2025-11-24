@@ -19,7 +19,7 @@ import time
 import sys
 from pathlib import Path
 from typing import Optional, List, Tuple
-from pgptracker.stage1_processing.unstrat_pgpt import load_pathways_db
+from pgptracker.stage1_processing.f_unstrat_pgpt import load_pathways_db
 from pgptracker.utils.profiling_tools.profiler import profile_memory
 from pgptracker.utils.validator import find_asv_column
 

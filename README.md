@@ -10,7 +10,7 @@ It connects Amplicon Sequence Variants (ASVs) to predicted functions (KEGG Ortho
 
 The pipeline is split into two main stages and includes a graphical interface for exploration:
 
-* **Stage 1 (`process`):** Handles data processing (QIIME 2, adapted PICRUSt2) to generate unstratified (Function x Sample) and stratified (Taxon x Function x Sample) abundance tables. Utilizes optimized hybrid batching for memory efficiency.
+* **Stage 1 (`process`):** Handles data processing to generate unstratified (Function x Sample) and stratified (Taxon x Function x Sample) abundance tables. Utilizes optimized hybrid batching for memory efficiency.
 * **Stage 2 (`analysis`):** Takes the tables from Stage 1 and performs normalization (CLR), statistical analysis (Kruskal-Wallis, PERMANOVA), machine learning (Random Forest, Lasso, Boruta), and generates publication-quality visualizations (PCA, Heatmaps, Volcano Plots).
 * **Data Explorer (`gui`):** A browser-based interactive dashboard to explore results, visualize patterns, and compare groups dynamically.
 
@@ -18,7 +18,7 @@ The pipeline is split into two main stages and includes a graphical interface fo
 
 ## Installation
 
-PGPTracker is a pip-installable package that requires **Conda** to manage its bioinformatics dependencies (QIIME 2 and R).
+PGPTracker is a pip-installable package that requires **Conda** to manage its bioinformatics dependencies (QIIME 2 and PICRUSt2).
 
 ### Step 1: Create and Activate Base Environment
 Create and activate a clean Conda environment (Python 3.10+ recommended).
@@ -38,7 +38,7 @@ pip install pgptracker
 
 ### Step 3: Run Internal Setup (Mandatory)
 
-This command is **mandatory**. It automatically creates and configures the separate `qiime2` Conda environment that PGPTracker needs to run external tools.
+This command is **mandatory**. It automatically creates and configures the separate `qiime2` and `PICRUSt2` Conda environment that PGPTracker needs to run external tools.
 
 ```bash
 pgptracker setup
@@ -72,7 +72,7 @@ pgptracker process \
     --classifier-qza /path/to/custom_classifier.qza \
     --stratified \
     --tax-level Genus \
-    --max-nsti 2.0 \
+    --max-nsti 1.7 \
     --pgpt-level Lv3 
 ```
 

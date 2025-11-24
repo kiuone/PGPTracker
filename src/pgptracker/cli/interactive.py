@@ -1,37 +1,28 @@
 """
 PGPTracker Interactive Mode.
 
-This module provides the guided prompt interface for users.
-It supports all PGPTracker subcommands with intuitive prompts
-for each argument, including the new Stage 2 Analysis pipeline.
+This module provides a guided, menu-driven interface for users.
+It constructs argparse.Namespace objects dynamically based on user input
+and dispatches them to the appropriate pipeline handlers.
 """
 
 import argparse
 import sys
 from pathlib import Path
 from typing import Optional, Callable, Dict, Tuple, List, Any
-
-# Import core functions
 from pgptracker.stage1_processing.pipeline_st1 import run_pipeline
 from pgptracker.stage2_analysis.pipeline_st2 import run_stage2_pipeline
-from pgptracker.cli.subcommands import (
-    export_command,
-    place_seqs_command,
-    hsp_command,
-    metagenome_command,
-    classify_command,
-    merge_command,
-    unstratify_pgpt_command,
-    stratify_pgpt_command,
-    clr_command,
-    analysis_command
-)
+from pgptracker.cli.subcommands import (export_command, place_seqs_command,
+    hsp_command, metagenome_command, classify_command, merge_command,
+    unstratify_pgpt_command, stratify_pgpt_command, clr_command)
 from pgptracker.utils.env_manager import detect_available_cores, detect_available_memory
 
-# --- Helper Functions for Input ---
+# --- Input Helper Functions ---
 
 def _ask_yes_no(prompt: str, default: Optional[bool] = None) -> bool:
-    """Asks a yes/no question."""
+    """
+    Prompts the user for a yes/no answer.
+    """
     options = "(y/n)"
     if default is True:
         options = "(Y/n)"
@@ -49,7 +40,9 @@ def _ask_yes_no(prompt: str, default: Optional[bool] = None) -> bool:
         print("  Please answer 'y' or 'n'.")
 
 def _ask_path(prompt: str, must_exist: bool = True, optional: bool = False) -> Optional[str]:
-    """Asks for a file path and validates it."""
+    """
+    Prompts for a file path and validates its existence if required.
+    """
     while True:
         resp = input(f"  → {prompt}: ").strip()
         
@@ -68,7 +61,7 @@ def _ask_path(prompt: str, must_exist: bool = True, optional: bool = False) -> O
         return str(path)
 
 def _ask_float(prompt: str, default: float) -> float:
-    """Asks for a float, returning default on empty."""
+    """Prompts for a float value, falling back to default on empty input."""
     while True:
         resp = input(f"  {prompt} (default: {default}): ").strip()
         if not resp:
@@ -79,7 +72,7 @@ def _ask_float(prompt: str, default: float) -> float:
             print("  Please enter a valid number (e.g., 1.7 or 30.0).")
 
 def _ask_int(prompt: str, default: int) -> int:
-    """Asks for an integer, returning default on empty."""
+    """Prompts for an integer value, falling back to default on empty input."""
     while True:
         resp = input(f"  {prompt} (default: {default}): ").strip()
         if not resp:
@@ -90,7 +83,10 @@ def _ask_int(prompt: str, default: int) -> int:
             print("  Please enter a valid integer (e.g., 8 or 1000).")
 
 def _ask_choice(prompt: str, choices: List[str], default: str) -> str:
-    """Asks user to select from a list of options."""
+    """
+    Prompts user to select from a list of numbered options.
+    Returns the selected string value.
+    """
     print(f"  {prompt}")
     for i, choice in enumerate(choices, 1):
         marker = " (default)" if choice == default else ""
@@ -109,7 +105,6 @@ def _ask_choice(prompt: str, choices: List[str], default: str) -> str:
             print("  Please enter a valid number.")
 
 def _ask_string(prompt: str, default: Optional[str] = None) -> str:
-    """Asks for a simple string input."""
     default_text = f" (default: {default})" if default else ""
     while True:
         resp = input(f"  → {prompt}{default_text}: ").strip()
@@ -121,7 +116,6 @@ def _ask_string(prompt: str, default: Optional[str] = None) -> str:
         return resp
 
 def _display_and_ask_resources(default_threads: Optional[int] = None) -> int:
-    """Display detected resources and ask for threads to use."""
     detected_cores = detect_available_cores()
     detected_mem = detect_available_memory()
     print(f"  Detected {detected_cores} CPU cores.")
@@ -132,14 +126,14 @@ def _display_and_ask_resources(default_threads: Optional[int] = None) -> int:
     
     return _ask_int("Threads to use", default=default_threads)
 
-# --- Subcommand Prompt Functions (Stage 1) ---
+# --- Stage 1 Prompts (Processing) ---
 
 def _prompt_process() -> argparse.Namespace:
-    """Prompts for 'process' command arguments."""
+    """Collects arguments for the full Stage 1 pipeline."""
     print("\n=== PROCESS: Full Pipeline (ASVs → PGPTs) ===\n")
     args = argparse.Namespace()
     
-    # Input Files
+    # 1. Inputs
     print("[1/4] Input Files")
     print("─" * 50)
     if _ask_yes_no("Do you have .qza files?", default=False):
@@ -151,28 +145,38 @@ def _prompt_process() -> argparse.Namespace:
     
     args.classifier_qza = _ask_path("Custom classifier.qza path (optional, press Enter to use default)", must_exist=True, optional=True)
 
-    # Parameters
+    # 2. Parameters
     print("\n[2/4] Parameters")
     print("─" * 50)
+    # save_intermediates is internal, usually False for production
     args.save_intermediates = _ask_yes_no("Save intermediate files? (for debugging)", default=False)
     args.output = _ask_path("Output directory path (press Enter for default: results/run_YYYY-MM-DD)", must_exist=False, optional=True)
     args.max_nsti = _ask_float("Max NSTI threshold", default=1.7)
     args.chunk_size = _ask_int("PICRUSt2 chunk size", default=1000)
     args.stratified = _ask_yes_no("Run stratified analysis?", default=False)
     
+    # Default taxonomy/PGPT levels
+    args.tax_level = 'Genus'
+    args.pgpt_level = 'Lv3'
+
     if args.stratified:
         args.tax_level = _ask_choice(
             "Taxonomic level for stratification:",
             choices=['Kingdom', 'Phylum', 'Class', 'Order', 'Family', 'Genus', 'Species'],
             default='Genus'
         )
+        args.pgpt_level = _ask_choice(
+            "PGPT hierarchical level:",
+            choices=['Lv1', 'Lv2', 'Lv3', 'Lv4', 'Lv5'],
+            default='Lv3'
+        )
 
-    # Resources
+    # 3. Resources
     print("\n[3/4] Computational Resources")
     print("─" * 50)
     args.threads = _display_and_ask_resources()
 
-    # Confirmation
+    # 4. Confirmation
     print("\n[4/4] Confirmation")
     print("─" * 50)
     if not _ask_yes_no("Start pipeline with these settings?", default=True):
@@ -265,10 +269,9 @@ def _prompt_stratify() -> argparse.Namespace:
     )
     return args
 
-# --- Subcommand Prompt Functions (Stage 2) ---
+# --- Stage 2 Prompts (Analysis) ---
 
 def _prompt_clr() -> argparse.Namespace:
-    """Prompts for 'clr' command (Manual Normalization)."""
     print("\n=== CLR: Manual CLR Normalization ===\n")
     args = argparse.Namespace()
     
@@ -306,7 +309,8 @@ def _prompt_analysis() -> argparse.Namespace:
     args.input_table = _ask_path("Path to Feature Table (e.g., unstratified_pgpt.tsv or stratified.tsv)")
     args.metadata = _ask_path("Path to Metadata file (TSV)")
     args.output_dir = _ask_path("Output directory (press Enter for default)", must_exist=False, optional=True)
-    
+    args.metadata_id_col = _ask_string("Metadata Sample ID column", default="#SampleID")
+
     # 2. Table Config
     print("\n[2/4] Table Configuration")
     print("─" * 50)
@@ -327,9 +331,9 @@ def _prompt_analysis() -> argparse.Namespace:
             default="Lv3"
         )
     else:
-        # Long format handled automatically by defaults in pipeline
+        # Long format defaults
         args.orientation = 'D_N' 
-        args.feature_col_name = "Lv3" # Placeholder, mostly unused for long path
+        args.feature_col_name = "Lv3"
         
     # 3. Experimental Design
     print("\n[3/4] Experimental Design")
@@ -362,26 +366,23 @@ def _prompt_analysis() -> argparse.Namespace:
         args.ml_type = 'classification' # Dummy
         args.target_col = None
 
-    # Advanced hidden defaults
+    # --- CRITICAL DEFAULTS ---
+    # These are required by pipeline_st2 but not asked interactively to keep it simple
     args.tsne_perplexity = 30.0
-    args.verbose = True # Interactive users usually want to see progress
+    args.verbose = True 
+    args.plot_formats = ['png', 'pdf', 'svg'] 
     
     return args
 
-# --- Main Interactive Function ---
+# --- Main Interactive Loop ---
 
 def run_interactive_mode() -> int:
-    """
-    Runs the interactive mode with menu-driven subcommand selection.
-    
-    Returns:
-        int: Exit code (0 for success, 1 for failure/cancel).
-    """
     print("\n" + "=" * 60)
     print("  PGPTracker Interactive Mode")
     print("=" * 60)
     
     # Define subcommand menu
+    # Key: (command_name, description, prompt_function, handler_function)
     SUBCOMMANDS: Dict[str, Tuple[str, str, Callable, Callable]] = {
         # Stage 1
         '1': ('process', 'Run Stage 1 Pipeline (ASVs → PGPTs)', _prompt_process, run_pipeline),
@@ -394,7 +395,7 @@ def run_interactive_mode() -> int:
         '8': ('unstratify_pgpt', 'Generate unstratified PGPT table', _prompt_unstratify_pgpt, unstratify_pgpt_command),
         '9': ('stratify', 'Run stratified analysis', _prompt_stratify, stratify_pgpt_command),
         # Stage 2
-        '10': ('analysis', 'Run Stage 2 Pipeline (Stats & ML)', _prompt_analysis, analysis_command),
+        '10': ('analysis', 'Run Stage 2 Pipeline (Stats & ML)', _prompt_analysis, run_stage2_pipeline),
         '11': ('clr', 'Manual CLR Normalization', _prompt_clr, clr_command),
     }
     

@@ -13,7 +13,7 @@ import io
 
 # Import the functions to be tested
 # Adjust the import path based on your project structure
-from pgptracker.stage1_processing.gen_ko_abun import (
+from pgptracker.stage1_processing.d_gen_ko_abun import (
     _filter_by_nsti_polars,
     _normalize_by_marker_polars,
     _unstrat_funcs_only_by_samples_polars,

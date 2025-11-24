@@ -2,14 +2,13 @@
 Conda environment manager for PGPTracker.
 
 This module handles detection and execution of commands in the correct
-conda environments (qiime2 or pgptracker).
+conda environments (qiime2, picrust2, or pgptracker).
 """
 
 import subprocess
 import psutil
 import os
 import multiprocessing
-import importlib.resources
 from pathlib import Path
 from typing import List, Optional, Dict
 from functools import lru_cache
@@ -18,54 +17,19 @@ from datetime import date
 # Environment mapping
 ENV_MAP = {
     "qiime": "qiime2-amplicon-2025.10",
+    "Picrust2": "picrust2",
     "PGPTracker": "pgptracker"
 }
-
-def get_database_dir() -> Path:
-    """
-    Returns absolute path to bundled prokaryotic reference database.
-
-    Database structure:
-    - pro_ref/pro_ref.fna (reference genomes)
-    - pro_ref/pro_ref.tre (reference tree)
-    - pro_ref/pro_ref.hmm (HMM profiles)
-    - ko.txt.gz (KO abundance table)
-    - ec.txt.gz, cog.txt.gz, pfam.txt.gz, etc.
-
-    Returns:
-        Path to src/pgptracker/databases/prokaryotic
-
-    Raises:
-        RuntimeError: If database directory not found
-    """
-    db_path = importlib.resources.files("pgptracker") / "databases" / "prokaryotic"
-
-    if not db_path.is_dir():
-        raise RuntimeError(
-            f"Reference database not found at {db_path}\n"
-            "Please reinstall PGPTracker: pip install --force-reinstall ."
-        )
-
-    return Path(str(db_path))
 
 def detect_available_cores() -> int:
     return psutil.cpu_count(logical=True) or 1
 
 def detect_available_memory() -> float:
     """
-    Detects total system memory in GB (cross-platform).
+    Detects available system memory in GB (cross-platform).
     """
     mem = psutil.virtual_memory()
-    return round(mem.total / (1024 ** 3), 2)
-
-
-def detect_free_memory() -> float:
-    """
-    Detects currently available (free) memory in GB.
-    Use this for runtime RAM optimization decisions.
-    """
-    mem = psutil.virtual_memory()
-    return round(mem.available / (1024 ** 3), 2)
+    return round(mem.total / (1024 * 1024 * 1024), 2)
 
 
 def check_conda_available() -> bool:
