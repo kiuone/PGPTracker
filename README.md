@@ -4,6 +4,12 @@ PGPTracker is a command-line interface (CLI) tool designed to automate the compl
 
 It connects Amplicon Sequence Variants (ASVs) to predicted functions (KEGG Orthologs) and maps them to **Plant Growth-Promoting Traits (PGPTs)**.
 
+**You can read my Bachelor's thesis here:** https://heyzine.com/flip-book/414323bece.html
+
+**You can see all the examples, results and read my Bachelor's thesis in PDF here:** https://drive.google.com/drive/folders/1WjeMhvXvHmz8Vc3jQtuyfnHEMVQSjCVz?usp=drive_link
+
+## **SOON PGPTRACKER WILL BE IN NEXTFLOW!**
+
 ---
 
 ## Core Workflow
