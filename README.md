@@ -209,7 +209,7 @@ PGPTracker is built upon the work of many others. Please cite the core tools and
 
   * Mello, Vivian. **PGPTracker: Integration of soil metagenomic data for correlation of microbial markers with plant biochemical indicators.** (2025). UFPR Palotina.
 
-### PGPTracker & PLaBAse
+### PLaBAse & mgPGPT
 * Atz, S., Rauh, M., Gautam, A., Huson, D.H. **mgPGPT: Metagenomic analysis of plant growth-promoting traits.** (submitted, 2024, preprint)
 * Patz, S., Gautam, A., Becker, M., Ruppel, S., Rodríguez-Palenzuela, P., Huson, D.H. **PLaBAse: A comprehensive web resource for analyzing the plant growth-promoting potential of plant-associated bacteria.** (submitted 2021, preprint)
 
@@ -218,5 +218,3 @@ PGPTracker is built upon the work of many others. Please cite the core tools and
 * **PICRUSt2:** Douglas, G.M., Maffei, V.J., Zaneveld, J.R. et al. (2020). PICRUSt2 for prediction of metagenome functions. Nature Biotechnology 38, 685–688.
 * **Greengenes2:** McDonald, D., et al. (2024). Greengenes2 unifies microbial data in a single reference tree. Nature Biotechnology.
 <!-- end list -->
-
-```
